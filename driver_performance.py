@@ -8,9 +8,14 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
 import calendar
+import threading
+import time
 
 # Load environment variables
 load_dotenv()
+
+# ===== CACHE STORE CONFIGURATION =====
+CACHE_REFRESH_INTERVAL = 3600  # 1 hour in seconds
 
 # Page configuration
 st.set_page_config(
@@ -280,6 +285,153 @@ def get_database_connection():
     except Exception as e:
         st.error(f"Database connection failed: {e}")
         return None
+
+# ===== CACHE STORE MANAGER =====
+@st.cache_resource
+def get_cache_store():
+    """Initialize global cache store that persists across sessions."""
+    return {
+        'drivers_list': None,
+        'drivers_data': {},  # driver_code -> data
+        'last_updated': None,
+        'is_loading': False
+    }
+
+def load_all_data_to_cache(_engine, cache_store):
+    """Load all drivers data into cache store from database."""
+    start_date = datetime(2025, 9, 1)
+    end_date = datetime.now()
+
+    try:
+        with _engine.connect() as conn:
+            # Load all drivers list
+            drivers_query = """
+            SELECT DISTINCT driver_name, driver_code, guarantor
+            FROM swift_trip_log
+            WHERE driver_name IS NOT NULL
+            AND driver_code IS NOT NULL
+            AND loading_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
+            ORDER BY driver_name
+            """
+            result = conn.execute(text(drivers_query))
+            rows = result.fetchall()
+            drivers_df = pd.DataFrame(rows, columns=result.keys()) if rows else pd.DataFrame()
+            cache_store['drivers_list'] = drivers_df
+
+            # Load data for each driver
+            if not drivers_df.empty:
+                for _, row in drivers_df.iterrows():
+                    driver_code = row['driver_code']
+
+                    # Trip data
+                    trip_query = f"""
+                    SELECT * FROM swift_trip_log
+                    WHERE driver_code = '{driver_code}'
+                    AND loading_date >= '{start_date}'
+                    AND loading_date <= '{end_date}'
+                    ORDER BY loading_date DESC
+                    """
+                    trip_result = conn.execute(text(trip_query))
+                    trip_rows = trip_result.fetchall()
+                    trip_df = pd.DataFrame(trip_rows, columns=trip_result.keys()) if trip_rows else pd.DataFrame()
+
+                    # Driver info
+                    info_query = f"""
+                    SELECT code, name, guarantor, closing_balance, current_vehicle_number, app_date, unsettled_advance
+                    FROM swift_drivers WHERE code = '{driver_code}'
+                    """
+                    info_result = conn.execute(text(info_query))
+                    info_rows = info_result.fetchall()
+                    driver_info = pd.DataFrame(info_rows, columns=info_result.keys()) if info_rows else pd.DataFrame()
+
+                    # Challan data
+                    challan_query = f"""
+                    SELECT * FROM challan_data
+                    WHERE driver_code = '{driver_code}'
+                    AND challan_date >= '{start_date}' AND challan_date <= '{end_date}'
+                    """
+                    challan_result = conn.execute(text(challan_query))
+                    challan_rows = challan_result.fetchall()
+                    challan_df = pd.DataFrame(challan_rows, columns=challan_result.keys()) if challan_rows else pd.DataFrame()
+
+                    # Repair data
+                    repair_query = f"""
+                    SELECT * FROM deduction_data
+                    WHERE driver_code = '{driver_code}'
+                    AND transaction_date >= '{start_date}' AND transaction_date <= '{end_date}'
+                    AND type = 'Repair'
+                    """
+                    repair_result = conn.execute(text(repair_query))
+                    repair_rows = repair_result.fetchall()
+                    repair_df = pd.DataFrame(repair_rows, columns=repair_result.keys()) if repair_rows else pd.DataFrame()
+
+                    # POD damage data
+                    pod_query = f"""
+                    SELECT cn.*, stl.loading_date, stl.driver_code
+                    FROM cn_data cn
+                    INNER JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
+                    WHERE stl.driver_code = '{driver_code}'
+                    AND stl.loading_date >= '{start_date}' AND stl.loading_date <= '{end_date}'
+                    AND (cn.pod_status ILIKE '%Delay%' OR cn.pod_status ILIKE '%NOT OK%' OR cn.pod_status ILIKE '%NOT OKAY%')
+                    """
+                    pod_result = conn.execute(text(pod_query))
+                    pod_rows = pod_result.fetchall()
+                    pod_damage_df = pd.DataFrame(pod_rows, columns=pod_result.keys()) if pod_rows else pd.DataFrame()
+
+                    # Safety data
+                    safety_query = f"""
+                    SELECT * FROM day_wise_gps_km
+                    WHERE driver_code = '{driver_code}'
+                    AND date >= '{start_date}' AND date <= '{end_date}'
+                    """
+                    safety_result = conn.execute(text(safety_query))
+                    safety_rows = safety_result.fetchall()
+                    safety_data = pd.DataFrame(safety_rows, columns=safety_result.keys()) if safety_rows else pd.DataFrame()
+
+                    # Intangles data
+                    intangles_query = f"""
+                    SELECT * FROM intangles_alert_data
+                    WHERE driver_code = '{driver_code}'
+                    AND event_date >= '{start_date}' AND event_date <= '{end_date}'
+                    """
+                    intangles_result = conn.execute(text(intangles_query))
+                    intangles_rows = intangles_result.fetchall()
+                    intangles_safety = pd.DataFrame(intangles_rows, columns=intangles_result.keys()) if intangles_rows else pd.DataFrame()
+
+                    # Store in cache
+                    cache_store['drivers_data'][driver_code] = {
+                        'trip_df': trip_df,
+                        'driver_info': driver_info,
+                        'challan_df': challan_df,
+                        'repair_df': repair_df,
+                        'pod_damage_df': pod_damage_df,
+                        'safety_data': safety_data,
+                        'intangles_safety': intangles_safety
+                    }
+
+            cache_store['last_updated'] = datetime.now()
+            cache_store['is_loading'] = False
+            return True
+    except Exception as e:
+        cache_store['is_loading'] = False
+        return False
+
+def is_cache_stale(cache_store):
+    """Check if cache needs refresh (older than 1 hour)."""
+    if cache_store['last_updated'] is None:
+        return True
+    elapsed = (datetime.now() - cache_store['last_updated']).total_seconds()
+    return elapsed > CACHE_REFRESH_INTERVAL
+
+def get_driver_data_from_cache(cache_store, driver_code):
+    """Get driver data from cache store."""
+    if driver_code in cache_store['drivers_data']:
+        return cache_store['drivers_data'][driver_code]
+    return None
+
+def get_drivers_list_from_cache(cache_store):
+    """Get all drivers list from cache store."""
+    return cache_store['drivers_list']
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_all_drivers(_engine):
@@ -1493,20 +1645,29 @@ def main():
         st.error("Unable to connect to the database.")
         st.stop()
 
-    # Pre-warm cache for default driver (D1216) on first app load
-    if 'cache_warmed' not in st.session_state:
-        start_date = datetime(2025, 9, 1)
-        end_date = datetime.now()
-        # Pre-load default driver data (this will be cached)
-        get_all_driver_data(engine, 'D1216', start_date, end_date)
-        get_all_drivers(engine)
-        st.session_state.cache_warmed = True
+    # Initialize cache store
+    cache_store = get_cache_store()
+
+    # Load all data to cache if empty or stale (auto-refresh every 1 hour)
+    if is_cache_stale(cache_store) and not cache_store['is_loading']:
+        cache_store['is_loading'] = True
+        with st.spinner('🔄 Loading data to cache store... (This happens once every hour)'):
+            load_all_data_to_cache(engine, cache_store)
+        st.success(f"✅ Cache updated at {cache_store['last_updated'].strftime('%H:%M:%S')}")
+
+    # Show cache status in sidebar
+    if cache_store['last_updated']:
+        next_refresh = cache_store['last_updated'] + timedelta(seconds=CACHE_REFRESH_INTERVAL)
+        time_remaining = (next_refresh - datetime.now()).total_seconds()
+        if time_remaining > 0:
+            mins_remaining = int(time_remaining // 60)
+            st.sidebar.success(f"📦 Cache Store Active\n\n🕐 Last Updated: {cache_store['last_updated'].strftime('%H:%M:%S')}\n\n⏱️ Next Refresh: {mins_remaining} min")
 
     # Create tabs
     tab1, tab2 = st.tabs(["📊 Overall Performance", "⚠️ Low Performance Driver"])
 
     with tab1:
-        show_overall_performance(engine)
+        show_overall_performance(engine, cache_store)
 
     with tab2:
         show_low_performance_drivers(engine)
@@ -1663,13 +1824,13 @@ def show_low_performance_drivers(engine):
     else:
         st.info("No drivers match the selected filter criteria.")
 
-def show_overall_performance(engine):
-    """Show overall performance tab (existing dashboard)."""
+def show_overall_performance(engine, cache_store):
+    """Show overall performance tab (existing dashboard) - ALWAYS USES CACHE STORE."""
 
-    # Get all drivers
-    all_drivers = get_all_drivers(engine)
-    if all_drivers.empty:
-        st.error("No drivers found in database. Please check database connection.")
+    # Get all drivers from cache store (NO DATABASE HIT)
+    all_drivers = get_drivers_list_from_cache(cache_store)
+    if all_drivers is None or all_drivers.empty:
+        st.error("Cache store is empty. Please wait for data to load.")
         return
 
     # Driver Selector Section
@@ -1700,52 +1861,25 @@ def show_overall_performance(engine):
     start_date = datetime(2025, 9, 1)
     end_date = datetime.now()
 
-    # Initialize session state for caching driver data
-    if 'cached_driver_code' not in st.session_state:
-        st.session_state.cached_driver_code = None
-        st.session_state.cached_data = {}
+    # Get driver data from CACHE STORE (NO DATABASE HIT - INSTANT!)
+    cached_data = get_driver_data_from_cache(cache_store, driver_code)
 
-    # Check if we need to fetch new data (driver changed or no cache)
-    need_fetch = (st.session_state.cached_driver_code != driver_code or
-                  not st.session_state.cached_data)
+    if cached_data is None:
+        st.warning(f"No data found for {driver_name} [{driver_code}] in cache store.")
+        return
 
-    if need_fetch:
-        with st.spinner(f'Loading data for {driver_name}...'):
-            # Fetch all data in single connection (faster)
-            all_data = get_all_driver_data(engine, driver_code, start_date, end_date)
+    # Use cached data directly (INSTANT - no database hit)
+    trip_df = cached_data['trip_df']
+    if trip_df.empty:
+        st.warning(f"No trip data found for {driver_name} [{driver_code}] in the selected date range.")
+        return
 
-            trip_df = all_data['trip_df']
-            if trip_df.empty:
-                st.warning(f"No trip data found for {driver_name} [{driver_code}] in the selected date range.")
-                return
-
-            driver_info = all_data['driver_info']
-            challan_df = all_data['challan_df']
-            repair_df = all_data['repair_df']
-            pod_damage_df = all_data['pod_damage_df']
-            safety_data = all_data['safety_data']
-            intangles_safety = all_data['intangles_safety']
-
-            # Store in session state
-            st.session_state.cached_driver_code = driver_code
-            st.session_state.cached_data = {
-                'trip_df': trip_df,
-                'driver_info': driver_info,
-                'challan_df': challan_df,
-                'repair_df': repair_df,
-                'pod_damage_df': pod_damage_df,
-                'safety_data': safety_data,
-                'intangles_safety': intangles_safety
-            }
-
-    # Use cached data
-    trip_df = st.session_state.cached_data['trip_df']
-    driver_info = st.session_state.cached_data['driver_info']
-    challan_df = st.session_state.cached_data['challan_df']
-    repair_df = st.session_state.cached_data['repair_df']
-    pod_damage_df = st.session_state.cached_data['pod_damage_df']
-    safety_data = st.session_state.cached_data['safety_data']
-    intangles_safety = st.session_state.cached_data['intangles_safety']
+    driver_info = cached_data['driver_info']
+    challan_df = cached_data['challan_df']
+    repair_df = cached_data['repair_df']
+    pod_damage_df = cached_data['pod_damage_df']
+    safety_data = cached_data['safety_data']
+    intangles_safety = cached_data['intangles_safety']
 
     closing_balance = driver_info['closing_balance'].values[0] if not driver_info.empty else 0
 
