@@ -1871,8 +1871,10 @@ def show_overall_performance(engine):
     challan_df = all_data['challan_df']
     repair_df = all_data['repair_df']
     pod_damage_df = all_data['pod_damage_df']
-    safety_data = all_data['safety_data']
-    intangles_safety = all_data['intangles_safety']
+
+    # Use original functions for safety data (they return properly formatted dictionaries)
+    safety_data = get_safety_data(engine, driver_code, start_date, end_date)
+    intangles_safety = get_intangles_safety_data(engine, driver_code, start_date, end_date)
 
     closing_balance = driver_info['closing_balance'].values[0] if not driver_info.empty else 0
 
