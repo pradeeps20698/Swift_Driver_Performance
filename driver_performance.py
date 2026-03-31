@@ -1,4 +1,5 @@
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -18,6 +19,10 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+
+# Auto-refresh every 30 minutes (1800000 milliseconds)
+# This clears cache and fetches fresh data automatically
+st_autorefresh(interval=1800000, limit=None, key="data_refresh")
 
 # Custom CSS - Dark Mode Professional Theme
 st.markdown("""
