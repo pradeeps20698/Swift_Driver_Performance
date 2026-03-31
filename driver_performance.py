@@ -1858,9 +1858,29 @@ def show_overall_performance(engine):
     start_date = "2025-09-01"
     end_date = datetime.now().strftime('%Y-%m-%d')
 
-    # Get driver data (cached for 1 hour via @st.cache_data)
-    with st.spinner(f'Loading data for {driver_name}...'):
-        all_data = get_all_driver_data(engine, driver_code, start_date, end_date)
+    # Initialize session state for driver data cache
+    if 'driver_data_cache' not in st.session_state:
+        st.session_state.driver_data_cache = {}
+
+    # Check if data already in session cache (instant)
+    if driver_code in st.session_state.driver_data_cache:
+        cached = st.session_state.driver_data_cache[driver_code]
+        all_data = cached['all_data']
+        safety_data = cached['safety_data']
+        intangles_safety = cached['intangles_safety']
+    else:
+        # First time loading this driver - show spinner
+        with st.spinner(f'Loading data for {driver_name}...'):
+            all_data = get_all_driver_data(engine, driver_code, start_date, end_date)
+            safety_data = get_safety_data(engine, driver_code, start_date, end_date)
+            intangles_safety = get_intangles_safety_data(engine, driver_code, start_date, end_date)
+
+            # Store in session cache for instant switching
+            st.session_state.driver_data_cache[driver_code] = {
+                'all_data': all_data,
+                'safety_data': safety_data,
+                'intangles_safety': intangles_safety
+            }
 
     trip_df = all_data['trip_df']
     if trip_df.empty:
@@ -1871,10 +1891,6 @@ def show_overall_performance(engine):
     challan_df = all_data['challan_df']
     repair_df = all_data['repair_df']
     pod_damage_df = all_data['pod_damage_df']
-
-    # Use original functions for safety data (they return properly formatted dictionaries)
-    safety_data = get_safety_data(engine, driver_code, start_date, end_date)
-    intangles_safety = get_intangles_safety_data(engine, driver_code, start_date, end_date)
 
     closing_balance = driver_info['closing_balance'].values[0] if not driver_info.empty else 0
 
