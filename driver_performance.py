@@ -280,7 +280,7 @@ def get_database_connection():
         st.error(f"Database connection failed: {e}")
         return None
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_all_drivers(_engine):
     # Only get drivers who have trip data in the last 4 months (including current month)
     query = """
@@ -304,7 +304,7 @@ def get_all_drivers(_engine):
         st.error(f"Error fetching drivers: {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_driver_info(_engine, driver_code):
     query = f"""
     SELECT code, name, guarantor, closing_balance, current_vehicle_number, app_date, unsettled_advance
@@ -323,7 +323,7 @@ def get_driver_info(_engine, driver_code):
     except Exception as e:
         return pd.DataFrame()
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_security_from_excel(driver_code):
     """Get security submitted from Excel file based on driver code."""
     try:
@@ -336,7 +336,7 @@ def get_security_from_excel(driver_code):
     except Exception as e:
         return 0
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_trip_data(_engine, driver_code, start_date, end_date):
     query = f"""
     SELECT * FROM swift_trip_log
@@ -357,7 +357,7 @@ def get_trip_data(_engine, driver_code, start_date, end_date):
     except Exception as e:
         return pd.DataFrame()
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_challan_data(_engine, driver_code, start_date, end_date):
     """Get challan data for a driver using driver_code from challan_data table."""
     query = f"""
@@ -379,7 +379,7 @@ def get_challan_data(_engine, driver_code, start_date, end_date):
     except Exception as e:
         return pd.DataFrame()
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_pod_damage_data(_engine, driver_code, start_date, end_date):
     """
     Get POD damage data from cn_data table.
@@ -413,7 +413,7 @@ def get_pod_damage_data(_engine, driver_code, start_date, end_date):
     except Exception as e:
         return pd.DataFrame()
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_repair_data(_engine, driver_code, start_date, end_date):
     query = f"""
     SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data
@@ -452,7 +452,7 @@ def convert_vehicle_no_to_gps_format(vehicle_no):
             return letter_part + num_part
     return v
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_gps_km_for_driver(_engine, driver_code, start_date, end_date):
     """Calculate GPS KM for a driver based on fvts_vehicles odometer data.
     Maps driver to vehicle using swift_trip_log periods.
@@ -538,7 +538,7 @@ def get_gps_km_for_driver(_engine, driver_code, start_date, end_date):
     except Exception as e:
         return {}
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_safety_data(_engine, driver_code, start_date, end_date):
     """
     Get safety data (Night Drives and Overspeeding) from day_wise_gps_km table.
@@ -588,7 +588,7 @@ def get_safety_data(_engine, driver_code, start_date, end_date):
     except Exception as e:
         return {'night_drives': {}, 'overspeeding': {}}
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_intangles_safety_data(_engine, driver_code, start_date, end_date):
     """
     Get safety data from intangles_alert_logs table.
@@ -669,7 +669,7 @@ def get_intangles_safety_data(_engine, driver_code, start_date, end_date):
     except Exception as e:
         return {'hard_brake': {}, 'freerun': {}, 'harsh_acc': {}, 'idling_time': {}, 'idling_fuel': {}}
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_gps_km_from_daily(_engine, driver_code, start_date, end_date):
     """Get GPS KM data from day_wise_gps_km table grouped by month."""
     query = f"""
@@ -1096,7 +1096,7 @@ def get_challan_details(challan_df, month=None):
     display_df.columns = ['Challan No', 'Date', 'Vehicle', 'Amount (₹)', 'Status'][:len(available_cols)]
     return display_df
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_safety_details(_engine, driver_code, start_date, end_date, safety_type='overspeed'):
     """Get detailed safety data (overspeeding or night drives) from day_wise_gps_km table."""
     column = 'overspeed' if safety_type == 'overspeed' else 'night_drive'
@@ -1141,7 +1141,7 @@ def format_safety_details(safety_df, month=None):
     display_df.columns = ['Date', 'Vehicle', 'Total KM', 'Count']
     return display_df
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_intangles_details(_engine, driver_code, start_date, end_date, alert_type):
     """Get detailed intangles alert data for a specific alert type."""
     if alert_type == 'idling':
@@ -1210,7 +1210,7 @@ def format_intangles_details(intangles_df, month=None, alert_type='hard_brake'):
 
     return display_df
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_low_performance_drivers(_engine, start_date, end_date):
     """
     Get all drivers with comprehensive performance metrics matching Overall Performance tab.
