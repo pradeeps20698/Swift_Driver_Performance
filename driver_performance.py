@@ -1472,7 +1472,7 @@ def get_safety_details(_engine, driver_code, start_date, end_date, safety_type='
     except Exception as e:
         return pd.DataFrame()
 
-def format_safety_details(safety_df, month=None):
+def format_safety_details(safety_df, month=None, months_list=None):
     """Format safety details for display."""
     if safety_df.empty:
         return pd.DataFrame()
@@ -1483,6 +1483,8 @@ def format_safety_details(safety_df, month=None):
 
     if month and month != 'Total':
         df = df[df['month'] == month]
+    elif months_list:
+        df = df[df['month'].isin(months_list)]
 
     if df.empty:
         return pd.DataFrame()
@@ -1531,7 +1533,7 @@ def get_intangles_details(_engine, driver_code, start_date, end_date, alert_type
     except Exception as e:
         return pd.DataFrame()
 
-def format_intangles_details(intangles_df, month=None, alert_type='hard_brake'):
+def format_intangles_details(intangles_df, month=None, alert_type='hard_brake', months_list=None):
     """Format intangles alert details for display."""
     if intangles_df.empty:
         return pd.DataFrame()
@@ -1542,6 +1544,8 @@ def format_intangles_details(intangles_df, month=None, alert_type='hard_brake'):
 
     if month and month != 'Total':
         df = df[df['month'] == month]
+    elif months_list:
+        df = df[df['month'].isin(months_list)]
 
     if df.empty:
         return pd.DataFrame()
@@ -2566,9 +2570,39 @@ def show_overall_performance(engine):
 
     # Show details based on selection
     if detail_metric != "-- Select --":
+        # Filter data by displayed months when "All Months" is selected
+        if detail_month == "Total":
+            filtered_trip_df = trip_df[trip_df['month'].isin(months)]
+            if not pod_damage_df.empty:
+                pod_df_temp = pod_damage_df.copy()
+                pod_df_temp['loading_date'] = pd.to_datetime(pod_df_temp['loading_date'], errors='coerce')
+                pod_df_temp['month'] = pod_df_temp['loading_date'].dt.to_period('M').astype(str)
+                filtered_pod_df = pod_df_temp[pod_df_temp['month'].isin(months)]
+            else:
+                filtered_pod_df = pod_damage_df
+            if not repair_df.empty:
+                repair_df_temp = repair_df.copy()
+                repair_df_temp['effective_date'] = pd.to_datetime(repair_df_temp['effective_date'], errors='coerce')
+                repair_df_temp['month'] = repair_df_temp['effective_date'].dt.to_period('M').astype(str)
+                filtered_repair_df = repair_df_temp[repair_df_temp['month'].isin(months)]
+            else:
+                filtered_repair_df = repair_df
+            if not challan_df.empty:
+                challan_df_temp = challan_df.copy()
+                challan_df_temp['challan_date'] = pd.to_datetime(challan_df_temp['challan_date'], errors='coerce')
+                challan_df_temp['month'] = challan_df_temp['challan_date'].dt.to_period('M').astype(str)
+                filtered_challan_df = challan_df_temp[challan_df_temp['month'].isin(months)]
+            else:
+                filtered_challan_df = challan_df
+        else:
+            filtered_trip_df = trip_df
+            filtered_pod_df = pod_damage_df
+            filtered_repair_df = repair_df
+            filtered_challan_df = challan_df
+
         with st.expander(f"📋 {detail_metric} Details - {format_month_header(detail_month) if detail_month != 'Total' else 'All Months'}", expanded=True):
             if detail_metric == "Loaded Trip Count":
-                detail_df = get_trip_details(trip_df, detail_month if detail_month != "Total" else None)
+                detail_df = get_trip_details(filtered_trip_df, detail_month if detail_month != "Total" else None)
                 if not detail_df.empty:
                     st.markdown(f"**Total Trips: {len(detail_df)}**")
                     st.markdown(create_detail_table(detail_df, "Trip"), unsafe_allow_html=True)
@@ -2576,7 +2610,7 @@ def show_overall_performance(engine):
                     st.info("No trip data available for selected period")
 
             elif detail_metric == "Total Delays":
-                detail_df = get_delay_details(trip_df, detail_month if detail_month != "Total" else None)
+                detail_df = get_delay_details(filtered_trip_df, detail_month if detail_month != "Total" else None)
                 if not detail_df.empty:
                     st.markdown(f"**Total Delayed Trips: {len(detail_df)}**")
                     st.markdown(create_detail_table(detail_df, "Delayed Trips"), unsafe_allow_html=True)
@@ -2584,7 +2618,7 @@ def show_overall_performance(engine):
                     st.info("No delayed trips for selected period")
 
             elif detail_metric == "POD Damage":
-                detail_df = get_pod_damage_details(pod_damage_df, detail_month if detail_month != "Total" else None)
+                detail_df = get_pod_damage_details(filtered_pod_df, detail_month if detail_month != "Total" else None)
                 if not detail_df.empty:
                     st.markdown(f"**Total POD Issues: {len(detail_df)}**")
                     st.markdown(create_detail_table(detail_df, "POD Damage"), unsafe_allow_html=True)
@@ -2592,7 +2626,7 @@ def show_overall_performance(engine):
                     st.info("No POD damage data for selected period")
 
             elif detail_metric == "Total Repair Cost":
-                detail_df = get_repair_details(repair_df, detail_month if detail_month != "Total" else None)
+                detail_df = get_repair_details(filtered_repair_df, detail_month if detail_month != "Total" else None)
                 if not detail_df.empty:
                     total_repair_amt = detail_df['Amount (₹)'].sum() if 'Amount (₹)' in detail_df.columns else 0
                     st.markdown(f"**Total Repairs: {len(detail_df)} | Total Amount: ₹{total_repair_amt:,.0f}**")
@@ -2601,7 +2635,7 @@ def show_overall_performance(engine):
                     st.info("No repair data for selected period")
 
             elif detail_metric == "Total Challan":
-                detail_df = get_challan_details(challan_df, detail_month if detail_month != "Total" else None)
+                detail_df = get_challan_details(filtered_challan_df, detail_month if detail_month != "Total" else None)
                 if not detail_df.empty:
                     total_challan_amt = detail_df['Amount (₹)'].sum() if 'Amount (₹)' in detail_df.columns else 0
                     st.markdown(f"**Total Challans: {len(detail_df)} | Total Amount: ₹{total_challan_amt:,.0f}**")
@@ -2611,7 +2645,7 @@ def show_overall_performance(engine):
 
             elif detail_metric == "Harsh Driving / Overspeeding":
                 overspeed_df = get_safety_details(engine, driver_code, start_date, end_date, 'overspeed')
-                detail_df = format_safety_details(overspeed_df, detail_month if detail_month != "Total" else None)
+                detail_df = format_safety_details(overspeed_df, detail_month if detail_month != "Total" else None, months_list=months if detail_month == "Total" else None)
                 if not detail_df.empty:
                     total_count = detail_df['Count'].sum() if 'Count' in detail_df.columns else 0
                     st.markdown(f"**Total Overspeeding Days: {len(detail_df)} | Total Instances: {int(total_count)}**")
@@ -2621,7 +2655,7 @@ def show_overall_performance(engine):
 
             elif detail_metric == "Night Drives":
                 night_df = get_safety_details(engine, driver_code, start_date, end_date, 'night_drive')
-                detail_df = format_safety_details(night_df, detail_month if detail_month != "Total" else None)
+                detail_df = format_safety_details(night_df, detail_month if detail_month != "Total" else None, months_list=months if detail_month == "Total" else None)
                 if not detail_df.empty:
                     total_count = detail_df['Count'].sum() if 'Count' in detail_df.columns else 0
                     st.markdown(f"**Total Night Drive Days: {len(detail_df)} | Total Instances: {int(total_count)}**")
@@ -2631,7 +2665,7 @@ def show_overall_performance(engine):
 
             elif detail_metric == "Hard Braking":
                 hard_brake_df = get_intangles_details(engine, driver_code, start_date, end_date, 'hard_brake')
-                detail_df = format_intangles_details(hard_brake_df, detail_month if detail_month != "Total" else None, 'hard_brake')
+                detail_df = format_intangles_details(hard_brake_df, detail_month if detail_month != "Total" else None, 'hard_brake', months_list=months if detail_month == "Total" else None)
                 if not detail_df.empty:
                     st.markdown(f"**Total Hard Braking Events: {len(detail_df)}**")
                     st.markdown(create_detail_table(detail_df, "Hard Braking"), unsafe_allow_html=True)
@@ -2640,7 +2674,7 @@ def show_overall_performance(engine):
 
             elif detail_metric == "Harsh Acceleration":
                 harsh_acc_df = get_intangles_details(engine, driver_code, start_date, end_date, 'over_acc')
-                detail_df = format_intangles_details(harsh_acc_df, detail_month if detail_month != "Total" else None, 'over_acc')
+                detail_df = format_intangles_details(harsh_acc_df, detail_month if detail_month != "Total" else None, 'over_acc', months_list=months if detail_month == "Total" else None)
                 if not detail_df.empty:
                     st.markdown(f"**Total Harsh Acceleration Events: {len(detail_df)}**")
                     st.markdown(create_detail_table(detail_df, "Harsh Acceleration"), unsafe_allow_html=True)
@@ -2649,7 +2683,7 @@ def show_overall_performance(engine):
 
             elif detail_metric == "Freerunning":
                 freerun_df = get_intangles_details(engine, driver_code, start_date, end_date, 'freerun')
-                detail_df = format_intangles_details(freerun_df, detail_month if detail_month != "Total" else None, 'freerun')
+                detail_df = format_intangles_details(freerun_df, detail_month if detail_month != "Total" else None, 'freerun', months_list=months if detail_month == "Total" else None)
                 if not detail_df.empty:
                     st.markdown(f"**Total Freerunning Events: {len(detail_df)}**")
                     st.markdown(create_detail_table(detail_df, "Freerunning"), unsafe_allow_html=True)
@@ -2658,10 +2692,16 @@ def show_overall_performance(engine):
 
             elif detail_metric == "Idling":
                 idling_df = get_intangles_details(engine, driver_code, start_date, end_date, 'idling')
-                detail_df = format_intangles_details(idling_df, detail_month if detail_month != "Total" else None, 'idling')
+                detail_df = format_intangles_details(idling_df, detail_month if detail_month != "Total" else None, 'idling', months_list=months if detail_month == "Total" else None)
                 if not detail_df.empty:
-                    total_duration = idling_df['duration_mins'].sum() if 'duration_mins' in idling_df.columns else 0
-                    total_fuel = idling_df['fuel_consumed'].sum() if 'fuel_consumed' in idling_df.columns else 0
+                    # Filter idling_df by displayed months for accurate totals
+                    idling_df_filtered = idling_df.copy()
+                    idling_df_filtered['event_time'] = pd.to_datetime(idling_df_filtered['event_time'], errors='coerce')
+                    idling_df_filtered['month'] = idling_df_filtered['event_time'].dt.to_period('M').astype(str)
+                    if detail_month == "Total":
+                        idling_df_filtered = idling_df_filtered[idling_df_filtered['month'].isin(months)]
+                    total_duration = idling_df_filtered['duration_mins'].sum() if 'duration_mins' in idling_df_filtered.columns else 0
+                    total_fuel = idling_df_filtered['fuel_consumed'].sum() if 'fuel_consumed' in idling_df_filtered.columns else 0
                     st.markdown(f"**Total Idling Events: {len(detail_df)} | Total Time: {total_duration:.1f} mins | Fuel: {total_fuel:.2f} L**")
                     st.markdown(create_detail_table(detail_df, "Idling"), unsafe_allow_html=True)
                 else:
