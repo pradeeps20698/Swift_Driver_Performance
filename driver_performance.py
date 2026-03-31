@@ -1562,7 +1562,7 @@ def show_overall_performance(engine):
             if 'D1216' in option:
                 default_index = i
                 break
-        selected_driver = st.selectbox("**Select Driver with Code >>**", driver_options, index=default_index)
+        selected_driver = st.selectbox("**Select Driver with Code >>**", driver_options, index=default_index, key="driver_select")
 
     # Extract driver code
     driver_code = selected_driver.split("[")[-1].replace("]", "").strip()
@@ -1576,34 +1576,56 @@ def show_overall_performance(engine):
     start_date = datetime(2025, 9, 1)
     end_date = datetime.now()
 
-    # Fetch data
-    trip_df = get_trip_data(engine, driver_code, start_date, end_date)
+    # Initialize session state for caching driver data
+    if 'cached_driver_code' not in st.session_state:
+        st.session_state.cached_driver_code = None
+        st.session_state.cached_data = {}
 
-    if trip_df.empty:
-        st.warning(f"No trip data found for {driver_name} [{driver_code}] in the selected date range.")
-        return
+    # Check if we need to fetch new data (driver changed or no cache)
+    need_fetch = (st.session_state.cached_driver_code != driver_code or
+                  not st.session_state.cached_data)
 
-    # Get driver info
-    driver_info = get_driver_info(engine, driver_code)
+    if need_fetch:
+        with st.spinner(f'Loading data for {driver_name}...'):
+            # Fetch all data
+            trip_df = get_trip_data(engine, driver_code, start_date, end_date)
+
+            if trip_df.empty:
+                st.warning(f"No trip data found for {driver_name} [{driver_code}] in the selected date range.")
+                return
+
+            driver_info = get_driver_info(engine, driver_code)
+            challan_df = get_challan_data(engine, driver_code, start_date, end_date)
+            repair_df = get_repair_data(engine, driver_code, start_date, end_date)
+            pod_damage_df = get_pod_damage_data(engine, driver_code, start_date, end_date)
+            safety_data = get_safety_data(engine, driver_code, start_date, end_date)
+            intangles_safety = get_intangles_safety_data(engine, driver_code, start_date, end_date)
+
+            # Store in session state
+            st.session_state.cached_driver_code = driver_code
+            st.session_state.cached_data = {
+                'trip_df': trip_df,
+                'driver_info': driver_info,
+                'challan_df': challan_df,
+                'repair_df': repair_df,
+                'pod_damage_df': pod_damage_df,
+                'safety_data': safety_data,
+                'intangles_safety': intangles_safety
+            }
+
+    # Use cached data
+    trip_df = st.session_state.cached_data['trip_df']
+    driver_info = st.session_state.cached_data['driver_info']
+    challan_df = st.session_state.cached_data['challan_df']
+    repair_df = st.session_state.cached_data['repair_df']
+    pod_damage_df = st.session_state.cached_data['pod_damage_df']
+    safety_data = st.session_state.cached_data['safety_data']
+    intangles_safety = st.session_state.cached_data['intangles_safety']
+
     closing_balance = driver_info['closing_balance'].values[0] if not driver_info.empty else 0
 
     # Get vehicles used by driver
     vehicle_nos = trip_df['vehicle_no'].dropna().unique().tolist()
-
-    # Get challan data (using driver_code directly)
-    challan_df = get_challan_data(engine, driver_code, start_date, end_date)
-
-    # Get repair data
-    repair_df = get_repair_data(engine, driver_code, start_date, end_date)
-
-    # Get POD damage data
-    pod_damage_df = get_pod_damage_data(engine, driver_code, start_date, end_date)
-
-    # Get safety data (Night Drives and Overspeeding)
-    safety_data = get_safety_data(engine, driver_code, start_date, end_date)
-
-    # Get intangles safety data (Hard Brake, Freerun, Idling)
-    intangles_safety = get_intangles_safety_data(engine, driver_code, start_date, end_date)
 
     # Convert dates
     trip_df['loading_date'] = pd.to_datetime(trip_df['loading_date'], errors='coerce')
