@@ -1652,8 +1652,11 @@ def main():
     if is_cache_stale(cache_store) and not cache_store['is_loading']:
         cache_store['is_loading'] = True
         with st.spinner('🔄 Loading data to cache store... (This happens once every hour)'):
-            load_all_data_to_cache(engine, cache_store)
-        st.success(f"✅ Cache updated at {cache_store['last_updated'].strftime('%H:%M:%S')}")
+            success = load_all_data_to_cache(engine, cache_store)
+        if success and cache_store['last_updated']:
+            st.success(f"✅ Cache updated at {cache_store['last_updated'].strftime('%H:%M:%S')}")
+        else:
+            st.error("❌ Failed to load cache. Please refresh the page.")
 
     # Show cache status in sidebar
     if cache_store['last_updated']:
