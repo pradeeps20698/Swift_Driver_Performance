@@ -2030,6 +2030,7 @@ def show_overall_performance(engine):
 
     # Center the dropdown with smaller width
     col_left, col_center, col_right = st.columns([1, 2, 1])
+    with col_center:
         # Set default to D1216 (MUFID ALI)
         default_index = 0
         for i, option in enumerate(driver_options):
