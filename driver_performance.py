@@ -477,11 +477,8 @@ def get_driver_info(_engine, driver_code):
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_all_driver_data(_engine, driver_code, start_date, end_date):
+def get_all_driver_data(_engine, driver_code, start_str, end_str):
     """Fetch all driver data in a single database connection for better performance."""
-    # Format dates for SQL
-    start_str = start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date)
-    end_str = end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date)
 
     try:
         with _engine.connect() as conn:
@@ -1846,9 +1843,9 @@ def show_overall_performance(engine):
     driver_row = all_drivers[all_drivers['driver_code'] == driver_code]
     guarantor = driver_row['guarantor'].values[0] if not driver_row.empty and pd.notna(driver_row['guarantor'].values[0]) else "N/A"
 
-    # Set default date range
-    start_date = datetime(2025, 9, 1)
-    end_date = datetime.now()
+    # Set default date range (convert to string for cache compatibility)
+    start_date = "2025-09-01"
+    end_date = datetime.now().strftime('%Y-%m-%d')
 
     # Get driver data (cached for 1 hour via @st.cache_data)
     with st.spinner(f'Loading data for {driver_name}...'):
