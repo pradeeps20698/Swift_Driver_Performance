@@ -479,14 +479,18 @@ def get_driver_info(_engine, driver_code):
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_all_driver_data(_engine, driver_code, start_date, end_date):
     """Fetch all driver data in a single database connection for better performance."""
+    # Format dates for SQL
+    start_str = start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date)
+    end_str = end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date)
+
     try:
         with _engine.connect() as conn:
             # Query 1: Trip data
             trip_query = f"""
             SELECT * FROM swift_trip_log
             WHERE driver_code = '{driver_code}'
-            AND loading_date >= '{start_date}'
-            AND loading_date <= '{end_date}'
+            AND loading_date >= '{start_str}'
+            AND loading_date <= '{end_str}'
             ORDER BY loading_date DESC
             """
             trip_result = conn.execute(text(trip_query))
@@ -507,8 +511,8 @@ def get_all_driver_data(_engine, driver_code, start_date, end_date):
             challan_query = f"""
             SELECT * FROM challan_data
             WHERE driver_code = '{driver_code}'
-            AND challan_date >= '{start_date}'
-            AND challan_date <= '{end_date}'
+            AND challan_date >= '{start_str}'
+            AND challan_date <= '{end_str}'
             ORDER BY challan_date DESC
             """
             challan_result = conn.execute(text(challan_query))
@@ -519,8 +523,8 @@ def get_all_driver_data(_engine, driver_code, start_date, end_date):
             repair_query = f"""
             SELECT * FROM deduction_data
             WHERE driver_code = '{driver_code}'
-            AND transaction_date >= '{start_date}'
-            AND transaction_date <= '{end_date}'
+            AND transaction_date >= '{start_str}'
+            AND transaction_date <= '{end_str}'
             AND type = 'Repair'
             ORDER BY transaction_date DESC
             """
@@ -534,8 +538,8 @@ def get_all_driver_data(_engine, driver_code, start_date, end_date):
             FROM cn_data cn
             INNER JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
             WHERE stl.driver_code = '{driver_code}'
-            AND stl.loading_date >= '{start_date}'
-            AND stl.loading_date <= '{end_date}'
+            AND stl.loading_date >= '{start_str}'
+            AND stl.loading_date <= '{end_str}'
             AND (
                 cn.pod_status ILIKE '%Delay%'
                 OR cn.pod_status ILIKE '%NOT OK%'
@@ -551,8 +555,8 @@ def get_all_driver_data(_engine, driver_code, start_date, end_date):
             safety_query = f"""
             SELECT * FROM day_wise_gps_km
             WHERE driver_code = '{driver_code}'
-            AND date >= '{start_date}'
-            AND date <= '{end_date}'
+            AND date >= '{start_str}'
+            AND date <= '{end_str}'
             ORDER BY date DESC
             """
             safety_result = conn.execute(text(safety_query))
@@ -563,8 +567,8 @@ def get_all_driver_data(_engine, driver_code, start_date, end_date):
             intangles_query = f"""
             SELECT * FROM intangles_alert_data
             WHERE driver_code = '{driver_code}'
-            AND event_date >= '{start_date}'
-            AND event_date <= '{end_date}'
+            AND event_date >= '{start_str}'
+            AND event_date <= '{end_str}'
             ORDER BY event_date DESC
             """
             intangles_result = conn.execute(text(intangles_query))
