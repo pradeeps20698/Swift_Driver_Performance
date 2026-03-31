@@ -401,9 +401,9 @@ def load_all_data_to_cache(_engine, cache_store):
 
                     # Intangles data
                     intangles_query = f"""
-                    SELECT * FROM intangles_alert_data
+                    SELECT * FROM intangles_alert_logs
                     WHERE driver_code = '{driver_code}'
-                    AND event_date >= '{start_date}' AND event_date <= '{end_date}'
+                    AND event_time >= '{start_date}' AND event_time <= '{end_date}'
                     """
                     intangles_result = conn.execute(text(intangles_query))
                     intangles_rows = intangles_result.fetchall()
@@ -572,11 +572,11 @@ def get_all_driver_data(_engine, driver_code, start_str, end_str):
 
             # Query 7: Intangles safety data
             intangles_query = f"""
-            SELECT * FROM intangles_alert_data
+            SELECT * FROM intangles_alert_logs
             WHERE driver_code = '{driver_code}'
-            AND event_date >= '{start_str}'
-            AND event_date <= '{end_str}'
-            ORDER BY event_date DESC
+            AND event_time >= '{start_str}'
+            AND event_time <= '{end_str}'
+            ORDER BY event_time DESC
             """
             intangles_result = conn.execute(text(intangles_query))
             intangles_rows = intangles_result.fetchall()
