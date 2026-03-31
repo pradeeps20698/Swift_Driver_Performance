@@ -1719,14 +1719,14 @@ def get_low_performance_drivers(_engine, start_date, end_date):
 
 @st.cache_resource(ttl=3600)
 def preload_all_drivers_cache(_engine):
-    """Pre-load ALL drivers data at startup. This runs once and caches for 1 hour."""
+    """Pre-load ALL drivers data at startup using BULK queries. Much faster than per-driver queries."""
     start_str = "2025-09-01"
     end_str = datetime.now().strftime('%Y-%m-%d')
     all_cache = {}
 
     try:
-        # Get all drivers list
         with _engine.connect() as conn:
+            # 1. Get all active drivers (single query)
             drivers_query = """
             SELECT DISTINCT driver_code, driver_name
             FROM swift_trip_log
@@ -1734,83 +1734,144 @@ def preload_all_drivers_cache(_engine):
             AND loading_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
             ORDER BY driver_name
             """
-            result = conn.execute(text(drivers_query))
-            drivers = result.fetchall()
+            drivers_result = conn.execute(text(drivers_query))
+            drivers = drivers_result.fetchall()
+            driver_codes = [d[0] for d in drivers]
 
-            # Load data for each driver in same connection
-            for driver_row in drivers:
-                driver_code = driver_row[0]
+            if not driver_codes:
+                return {}
 
-                # Trip data
-                trip_query = f"SELECT * FROM swift_trip_log WHERE driver_code = '{driver_code}' AND loading_date >= '{start_str}' AND loading_date <= '{end_str}' ORDER BY loading_date DESC"
-                trip_df = pd.DataFrame(conn.execute(text(trip_query)).fetchall())
-                if trip_df.empty:
-                    continue
-
-                # Driver info
-                info_query = f"SELECT code, name, guarantor, closing_balance, current_vehicle_number, app_date, unsettled_advance FROM swift_drivers WHERE code = '{driver_code}'"
-                info_result = conn.execute(text(info_query))
-                driver_info = pd.DataFrame(info_result.fetchall(), columns=info_result.keys()) if info_result else pd.DataFrame()
-
-                # Challan data
-                challan_query = f"SELECT * FROM challan_data WHERE driver_code = '{driver_code}' AND challan_date >= '{start_str}' AND challan_date <= '{end_str}'"
-                challan_result = conn.execute(text(challan_query))
-                challan_df = pd.DataFrame(challan_result.fetchall(), columns=challan_result.keys()) if challan_result else pd.DataFrame()
-
-                # Repair data
-                repair_query = f"SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data WHERE driver_code = '{driver_code}' AND COALESCE(voucher_date, doe) >= '{start_str}' AND COALESCE(voucher_date, doe) <= '{end_str}'"
-                repair_result = conn.execute(text(repair_query))
-                repair_df = pd.DataFrame(repair_result.fetchall(), columns=repair_result.keys()) if repair_result else pd.DataFrame()
-
-                # POD damage
-                pod_query = f"SELECT cn.*, stl.loading_date, stl.driver_code FROM cn_data cn INNER JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no WHERE stl.driver_code = '{driver_code}' AND stl.loading_date >= '{start_str}' AND stl.loading_date <= '{end_str}' AND (cn.pod_status ILIKE '%Delay%' OR cn.pod_status ILIKE '%NOT OK%')"
-                pod_result = conn.execute(text(pod_query))
-                pod_damage_df = pd.DataFrame(pod_result.fetchall(), columns=pod_result.keys()) if pod_result else pd.DataFrame()
-
-                # Safety data
-                safety_query = f"SELECT TO_CHAR(date, 'YYYY-MM') as month, COUNT(CASE WHEN overspeed > 0 THEN 1 END) as overspeed_count, COUNT(CASE WHEN night_drive > 0 THEN 1 END) as night_drive_count FROM day_wise_gps_km WHERE driver_code = '{driver_code}' AND date >= '{start_str}' AND date <= '{end_str}' GROUP BY TO_CHAR(date, 'YYYY-MM')"
-                safety_result = conn.execute(text(safety_query))
-                safety_rows = safety_result.fetchall()
-                monthly_night_drives, monthly_overspeeding = {}, {}
-                total_night, total_over = 0, 0
-                for row in safety_rows:
-                    if row[0]:
-                        monthly_overspeeding[row[0]] = int(row[1] or 0)
-                        monthly_night_drives[row[0]] = int(row[2] or 0)
-                        total_over += int(row[1] or 0)
-                        total_night += int(row[2] or 0)
-                monthly_night_drives['total'], monthly_overspeeding['total'] = total_night, total_over
-                safety_data = {'night_drives': monthly_night_drives, 'overspeeding': monthly_overspeeding}
-
-                # Intangles data
-                intangles_query = f"SELECT TO_CHAR(event_time, 'YYYY-MM') as month, COUNT(DISTINCT CASE WHEN alert_type = 'hard_brake' THEN DATE(event_time) END) as hb, COUNT(DISTINCT CASE WHEN alert_type = 'freerun' THEN DATE(event_time) END) as fr, COUNT(CASE WHEN alert_type = 'over_acc' THEN 1 END) as ha, COALESCE(SUM(CASE WHEN alert_type = 'idling' THEN (end_time - start_time) / 60.0 ELSE 0 END), 0) as it, COALESCE(SUM(CASE WHEN alert_type = 'idling' THEN fuel_consumed ELSE 0 END), 0) as if FROM intangles_alert_logs WHERE driver_code = '{driver_code}' AND event_time >= '{start_str}' AND event_time <= '{end_str}' GROUP BY TO_CHAR(event_time, 'YYYY-MM')"
-                intangles_result = conn.execute(text(intangles_query))
-                intangles_rows = intangles_result.fetchall()
-                mhb, mfr, mha, mit, mif = {}, {}, {}, {}, {}
-                thb, tfr, tha, tit, tif = 0, 0, 0, 0, 0
-                for row in intangles_rows:
-                    if row[0]:
-                        m = row[0]
-                        mhb[m], mfr[m], mha[m] = int(row[1] or 0), int(row[2] or 0), int(row[3] or 0)
-                        mit[m], mif[m] = round(float(row[4] or 0), 1), round(float(row[5] or 0), 2)
-                        thb += mhb[m]; tfr += mfr[m]; tha += mha[m]; tit += mit[m]; tif += mif[m]
-                mhb['total'], mfr['total'], mha['total'] = thb, tfr, tha
-                mit['total'], mif['total'] = round(tit, 1), round(tif, 2)
-                intangles_safety = {'hard_brake': mhb, 'freerun': mfr, 'harsh_acc': mha, 'idling_time': mit, 'idling_fuel': mif}
-
-                # Store in cache
-                trip_result = conn.execute(text(trip_query))
-                trip_df = pd.DataFrame(trip_result.fetchall(), columns=trip_result.keys())
-
-                all_cache[driver_code] = {
-                    'trip_df': trip_df,
-                    'driver_info': driver_info,
-                    'challan_df': challan_df,
-                    'repair_df': repair_df,
-                    'pod_damage_df': pod_damage_df,
-                    'safety_data': safety_data,
-                    'intangles_safety': intangles_safety
+            # Initialize cache for all drivers
+            for dc in driver_codes:
+                all_cache[dc] = {
+                    'trip_df': pd.DataFrame(),
+                    'driver_info': pd.DataFrame(),
+                    'challan_df': pd.DataFrame(),
+                    'repair_df': pd.DataFrame(),
+                    'pod_damage_df': pd.DataFrame(),
+                    'safety_data': {'night_drives': {'total': 0}, 'overspeeding': {'total': 0}},
+                    'intangles_safety': {'hard_brake': {'total': 0}, 'freerun': {'total': 0}, 'harsh_acc': {'total': 0}, 'idling_time': {'total': 0}, 'idling_fuel': {'total': 0}}
                 }
+
+            # 2. BULK: All trip data (single query for ALL drivers)
+            trip_query = f"""
+            SELECT * FROM swift_trip_log
+            WHERE loading_date >= '{start_str}' AND loading_date <= '{end_str}'
+            ORDER BY driver_code, loading_date DESC
+            """
+            trip_result = conn.execute(text(trip_query))
+            all_trips = pd.DataFrame(trip_result.fetchall(), columns=trip_result.keys())
+            if not all_trips.empty:
+                for dc in driver_codes:
+                    driver_trips = all_trips[all_trips['driver_code'] == dc]
+                    if not driver_trips.empty:
+                        all_cache[dc]['trip_df'] = driver_trips
+
+            # 3. BULK: All driver info (single query)
+            info_query = "SELECT code, name, guarantor, closing_balance, current_vehicle_number, app_date, unsettled_advance FROM swift_drivers"
+            info_result = conn.execute(text(info_query))
+            all_info = pd.DataFrame(info_result.fetchall(), columns=info_result.keys())
+            if not all_info.empty:
+                for dc in driver_codes:
+                    driver_info = all_info[all_info['code'] == dc]
+                    if not driver_info.empty:
+                        all_cache[dc]['driver_info'] = driver_info
+
+            # 4. BULK: All challan data (single query)
+            challan_query = f"""
+            SELECT * FROM challan_data
+            WHERE challan_date >= '{start_str}' AND challan_date <= '{end_str}'
+            """
+            challan_result = conn.execute(text(challan_query))
+            all_challans = pd.DataFrame(challan_result.fetchall(), columns=challan_result.keys())
+            if not all_challans.empty:
+                for dc in driver_codes:
+                    driver_challans = all_challans[all_challans['driver_code'] == dc]
+                    if not driver_challans.empty:
+                        all_cache[dc]['challan_df'] = driver_challans
+
+            # 5. BULK: All repair data (single query)
+            repair_query = f"""
+            SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data
+            WHERE COALESCE(voucher_date, doe) >= '{start_str}' AND COALESCE(voucher_date, doe) <= '{end_str}'
+            """
+            repair_result = conn.execute(text(repair_query))
+            all_repairs = pd.DataFrame(repair_result.fetchall(), columns=repair_result.keys())
+            if not all_repairs.empty:
+                for dc in driver_codes:
+                    driver_repairs = all_repairs[all_repairs['driver_code'] == dc]
+                    if not driver_repairs.empty:
+                        all_cache[dc]['repair_df'] = driver_repairs
+
+            # 6. BULK: All POD damage data (single query)
+            pod_query = f"""
+            SELECT cn.*, stl.loading_date, stl.driver_code
+            FROM cn_data cn
+            INNER JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
+            WHERE stl.loading_date >= '{start_str}' AND stl.loading_date <= '{end_str}'
+            AND (cn.pod_status ILIKE '%Delay%' OR cn.pod_status ILIKE '%NOT OK%')
+            """
+            pod_result = conn.execute(text(pod_query))
+            all_pods = pd.DataFrame(pod_result.fetchall(), columns=pod_result.keys())
+            if not all_pods.empty:
+                for dc in driver_codes:
+                    driver_pods = all_pods[all_pods['driver_code'] == dc]
+                    if not driver_pods.empty:
+                        all_cache[dc]['pod_damage_df'] = driver_pods
+
+            # 7. BULK: All safety data (single query)
+            safety_query = f"""
+            SELECT driver_code, TO_CHAR(date, 'YYYY-MM') as month,
+                   COUNT(CASE WHEN overspeed > 0 THEN 1 END) as overspeed_count,
+                   COUNT(CASE WHEN night_drive > 0 THEN 1 END) as night_drive_count
+            FROM day_wise_gps_km
+            WHERE date >= '{start_str}' AND date <= '{end_str}'
+            GROUP BY driver_code, TO_CHAR(date, 'YYYY-MM')
+            """
+            safety_result = conn.execute(text(safety_query))
+            safety_rows = safety_result.fetchall()
+            for row in safety_rows:
+                dc, month = row[0], row[1]
+                if dc in all_cache and month:
+                    overspeed = int(row[2] or 0)
+                    night = int(row[3] or 0)
+                    all_cache[dc]['safety_data']['overspeeding'][month] = overspeed
+                    all_cache[dc]['safety_data']['night_drives'][month] = night
+                    all_cache[dc]['safety_data']['overspeeding']['total'] = all_cache[dc]['safety_data']['overspeeding'].get('total', 0) + overspeed
+                    all_cache[dc]['safety_data']['night_drives']['total'] = all_cache[dc]['safety_data']['night_drives'].get('total', 0) + night
+
+            # 8. BULK: All intangles data (single query)
+            intangles_query = f"""
+            SELECT driver_code, TO_CHAR(event_time, 'YYYY-MM') as month,
+                   COUNT(DISTINCT CASE WHEN alert_type = 'hard_brake' THEN DATE(event_time) END) as hb,
+                   COUNT(DISTINCT CASE WHEN alert_type = 'freerun' THEN DATE(event_time) END) as fr,
+                   COUNT(CASE WHEN alert_type = 'over_acc' THEN 1 END) as ha,
+                   COALESCE(SUM(CASE WHEN alert_type = 'idling' THEN (end_time - start_time) / 60.0 ELSE 0 END), 0) as it,
+                   COALESCE(SUM(CASE WHEN alert_type = 'idling' THEN fuel_consumed ELSE 0 END), 0) as ifl
+            FROM intangles_alert_logs
+            WHERE event_time >= '{start_str}' AND event_time <= '{end_str}'
+            GROUP BY driver_code, TO_CHAR(event_time, 'YYYY-MM')
+            """
+            intangles_result = conn.execute(text(intangles_query))
+            intangles_rows = intangles_result.fetchall()
+            for row in intangles_rows:
+                dc, month = row[0], row[1]
+                if dc in all_cache and month:
+                    hb, fr, ha = int(row[2] or 0), int(row[3] or 0), int(row[4] or 0)
+                    it, ifl = round(float(row[5] or 0), 1), round(float(row[6] or 0), 2)
+                    all_cache[dc]['intangles_safety']['hard_brake'][month] = hb
+                    all_cache[dc]['intangles_safety']['freerun'][month] = fr
+                    all_cache[dc]['intangles_safety']['harsh_acc'][month] = ha
+                    all_cache[dc]['intangles_safety']['idling_time'][month] = it
+                    all_cache[dc]['intangles_safety']['idling_fuel'][month] = ifl
+                    all_cache[dc]['intangles_safety']['hard_brake']['total'] = all_cache[dc]['intangles_safety']['hard_brake'].get('total', 0) + hb
+                    all_cache[dc]['intangles_safety']['freerun']['total'] = all_cache[dc]['intangles_safety']['freerun'].get('total', 0) + fr
+                    all_cache[dc]['intangles_safety']['harsh_acc']['total'] = all_cache[dc]['intangles_safety']['harsh_acc'].get('total', 0) + ha
+                    all_cache[dc]['intangles_safety']['idling_time']['total'] = round(all_cache[dc]['intangles_safety']['idling_time'].get('total', 0) + it, 1)
+                    all_cache[dc]['intangles_safety']['idling_fuel']['total'] = round(all_cache[dc]['intangles_safety']['idling_fuel'].get('total', 0) + ifl, 2)
+
+            # Remove drivers with no trip data
+            all_cache = {dc: data for dc, data in all_cache.items() if not data['trip_df'].empty}
 
         return all_cache
     except Exception as e:
