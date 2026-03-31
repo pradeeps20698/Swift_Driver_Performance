@@ -1717,6 +1717,105 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         st.error(f"Error loading low performance data: {e}")
         return pd.DataFrame()
 
+@st.cache_resource(ttl=3600)
+def preload_all_drivers_cache(_engine):
+    """Pre-load ALL drivers data at startup. This runs once and caches for 1 hour."""
+    start_str = "2025-09-01"
+    end_str = datetime.now().strftime('%Y-%m-%d')
+    all_cache = {}
+
+    try:
+        # Get all drivers list
+        with _engine.connect() as conn:
+            drivers_query = """
+            SELECT DISTINCT driver_code, driver_name
+            FROM swift_trip_log
+            WHERE driver_name IS NOT NULL AND driver_code IS NOT NULL
+            AND loading_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months'
+            ORDER BY driver_name
+            """
+            result = conn.execute(text(drivers_query))
+            drivers = result.fetchall()
+
+            # Load data for each driver in same connection
+            for driver_row in drivers:
+                driver_code = driver_row[0]
+
+                # Trip data
+                trip_query = f"SELECT * FROM swift_trip_log WHERE driver_code = '{driver_code}' AND loading_date >= '{start_str}' AND loading_date <= '{end_str}' ORDER BY loading_date DESC"
+                trip_df = pd.DataFrame(conn.execute(text(trip_query)).fetchall())
+                if trip_df.empty:
+                    continue
+
+                # Driver info
+                info_query = f"SELECT code, name, guarantor, closing_balance, current_vehicle_number, app_date, unsettled_advance FROM swift_drivers WHERE code = '{driver_code}'"
+                info_result = conn.execute(text(info_query))
+                driver_info = pd.DataFrame(info_result.fetchall(), columns=info_result.keys()) if info_result else pd.DataFrame()
+
+                # Challan data
+                challan_query = f"SELECT * FROM challan_data WHERE driver_code = '{driver_code}' AND challan_date >= '{start_str}' AND challan_date <= '{end_str}'"
+                challan_result = conn.execute(text(challan_query))
+                challan_df = pd.DataFrame(challan_result.fetchall(), columns=challan_result.keys()) if challan_result else pd.DataFrame()
+
+                # Repair data
+                repair_query = f"SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data WHERE driver_code = '{driver_code}' AND COALESCE(voucher_date, doe) >= '{start_str}' AND COALESCE(voucher_date, doe) <= '{end_str}'"
+                repair_result = conn.execute(text(repair_query))
+                repair_df = pd.DataFrame(repair_result.fetchall(), columns=repair_result.keys()) if repair_result else pd.DataFrame()
+
+                # POD damage
+                pod_query = f"SELECT cn.*, stl.loading_date, stl.driver_code FROM cn_data cn INNER JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no WHERE stl.driver_code = '{driver_code}' AND stl.loading_date >= '{start_str}' AND stl.loading_date <= '{end_str}' AND (cn.pod_status ILIKE '%Delay%' OR cn.pod_status ILIKE '%NOT OK%')"
+                pod_result = conn.execute(text(pod_query))
+                pod_damage_df = pd.DataFrame(pod_result.fetchall(), columns=pod_result.keys()) if pod_result else pd.DataFrame()
+
+                # Safety data
+                safety_query = f"SELECT TO_CHAR(date, 'YYYY-MM') as month, COUNT(CASE WHEN overspeed > 0 THEN 1 END) as overspeed_count, COUNT(CASE WHEN night_drive > 0 THEN 1 END) as night_drive_count FROM day_wise_gps_km WHERE driver_code = '{driver_code}' AND date >= '{start_str}' AND date <= '{end_str}' GROUP BY TO_CHAR(date, 'YYYY-MM')"
+                safety_result = conn.execute(text(safety_query))
+                safety_rows = safety_result.fetchall()
+                monthly_night_drives, monthly_overspeeding = {}, {}
+                total_night, total_over = 0, 0
+                for row in safety_rows:
+                    if row[0]:
+                        monthly_overspeeding[row[0]] = int(row[1] or 0)
+                        monthly_night_drives[row[0]] = int(row[2] or 0)
+                        total_over += int(row[1] or 0)
+                        total_night += int(row[2] or 0)
+                monthly_night_drives['total'], monthly_overspeeding['total'] = total_night, total_over
+                safety_data = {'night_drives': monthly_night_drives, 'overspeeding': monthly_overspeeding}
+
+                # Intangles data
+                intangles_query = f"SELECT TO_CHAR(event_time, 'YYYY-MM') as month, COUNT(DISTINCT CASE WHEN alert_type = 'hard_brake' THEN DATE(event_time) END) as hb, COUNT(DISTINCT CASE WHEN alert_type = 'freerun' THEN DATE(event_time) END) as fr, COUNT(CASE WHEN alert_type = 'over_acc' THEN 1 END) as ha, COALESCE(SUM(CASE WHEN alert_type = 'idling' THEN (end_time - start_time) / 60.0 ELSE 0 END), 0) as it, COALESCE(SUM(CASE WHEN alert_type = 'idling' THEN fuel_consumed ELSE 0 END), 0) as if FROM intangles_alert_logs WHERE driver_code = '{driver_code}' AND event_time >= '{start_str}' AND event_time <= '{end_str}' GROUP BY TO_CHAR(event_time, 'YYYY-MM')"
+                intangles_result = conn.execute(text(intangles_query))
+                intangles_rows = intangles_result.fetchall()
+                mhb, mfr, mha, mit, mif = {}, {}, {}, {}, {}
+                thb, tfr, tha, tit, tif = 0, 0, 0, 0, 0
+                for row in intangles_rows:
+                    if row[0]:
+                        m = row[0]
+                        mhb[m], mfr[m], mha[m] = int(row[1] or 0), int(row[2] or 0), int(row[3] or 0)
+                        mit[m], mif[m] = round(float(row[4] or 0), 1), round(float(row[5] or 0), 2)
+                        thb += mhb[m]; tfr += mfr[m]; tha += mha[m]; tit += mit[m]; tif += mif[m]
+                mhb['total'], mfr['total'], mha['total'] = thb, tfr, tha
+                mit['total'], mif['total'] = round(tit, 1), round(tif, 2)
+                intangles_safety = {'hard_brake': mhb, 'freerun': mfr, 'harsh_acc': mha, 'idling_time': mit, 'idling_fuel': mif}
+
+                # Store in cache
+                trip_result = conn.execute(text(trip_query))
+                trip_df = pd.DataFrame(trip_result.fetchall(), columns=trip_result.keys())
+
+                all_cache[driver_code] = {
+                    'trip_df': trip_df,
+                    'driver_info': driver_info,
+                    'challan_df': challan_df,
+                    'repair_df': repair_df,
+                    'pod_damage_df': pod_damage_df,
+                    'safety_data': safety_data,
+                    'intangles_safety': intangles_safety
+                }
+
+        return all_cache
+    except Exception as e:
+        return {}
+
 def main():
     # Header
     st.markdown('<h1 class="main-header">🚗 Driver Performance Dashboard</h1>', unsafe_allow_html=True)
@@ -1728,8 +1827,19 @@ def main():
         st.error("Unable to connect to the database.")
         st.stop()
 
+    # Pre-load ALL drivers data (cached for 1 hour)
+    with st.spinner('📦 Loading all drivers data to cache... (one-time, refreshes every hour)'):
+        all_drivers_cache = preload_all_drivers_cache(engine)
+
+    if not all_drivers_cache:
+        st.error("Failed to load cache. Please refresh.")
+        st.stop()
+
     # Show cache info in sidebar
-    st.sidebar.success(f"📦 Cache Active (1 hour TTL)\n\n🕐 Data cached after first load")
+    st.sidebar.success(f"📦 Cache Loaded: {len(all_drivers_cache)} drivers\n\n✅ All drivers ready\n\n🕐 Auto-refresh: 1 hour")
+
+    # Store in session state for access
+    st.session_state.all_drivers_cache = all_drivers_cache
 
     # Create tabs
     tab1, tab2 = st.tabs(["📊 Overall Performance", "⚠️ Low Performance Driver"])
@@ -1893,12 +2003,26 @@ def show_low_performance_drivers(engine):
         st.info("No drivers match the selected filter criteria.")
 
 def show_overall_performance(engine):
-    """Show overall performance tab - Uses @st.cache_data for 1 hour caching."""
+    """Show overall performance tab - Uses PRE-LOADED CACHE (no database hit)."""
 
-    # Get all drivers (cached for 1 hour)
-    all_drivers = get_all_drivers(engine)
-    if all_drivers.empty:
-        st.error("No drivers found in database. Please check database connection.")
+    # Get drivers list from pre-loaded cache (NO DATABASE HIT!)
+    cache = st.session_state.all_drivers_cache
+    if not cache:
+        st.error("Cache is empty. Please refresh the page.")
+        return
+
+    # Build driver options from cache
+    driver_codes = list(cache.keys())
+    driver_options = []
+    for code in sorted(driver_codes):
+        if 'driver_info' in cache[code] and not cache[code]['driver_info'].empty:
+            name = cache[code]['driver_info']['name'].values[0] if 'name' in cache[code]['driver_info'].columns else code
+            driver_options.append(f"{name}[{code}]")
+        else:
+            driver_options.append(f"Driver[{code}]")
+
+    if not driver_options:
+        st.error("No drivers in cache.")
         return
 
     # Driver Selector Section
@@ -1906,9 +2030,6 @@ def show_overall_performance(engine):
 
     # Center the dropdown with smaller width
     col_left, col_center, col_right = st.columns([1, 2, 1])
-
-    with col_center:
-        driver_options = [f"{row['driver_name']}[{row['driver_code']}]" for _, row in all_drivers.iterrows()]
         # Set default to D1216 (MUFID ALI)
         default_index = 0
         for i, option in enumerate(driver_options):
@@ -1921,30 +2042,22 @@ def show_overall_performance(engine):
     driver_code = selected_driver.split("[")[-1].replace("]", "").strip()
     driver_name = selected_driver.split("[")[0].strip()
 
-    # Get guarantor
-    driver_row = all_drivers[all_drivers['driver_code'] == driver_code]
-    guarantor = driver_row['guarantor'].values[0] if not driver_row.empty and pd.notna(driver_row['guarantor'].values[0]) else "N/A"
+    # Get guarantor from cache
+    driver_info = cache[driver_code]['driver_info'] if driver_code in cache else pd.DataFrame()
+    guarantor = driver_info['guarantor'].values[0] if not driver_info.empty and 'guarantor' in driver_info.columns and pd.notna(driver_info['guarantor'].values[0]) else "N/A"
 
-    # Set default date range (convert to string for cache compatibility)
+    # Set default date range
     start_date = "2025-09-01"
     end_date = datetime.now().strftime('%Y-%m-%d')
 
-    # Initialize session state for driver data cache
-    if 'driver_data_cache' not in st.session_state:
-        st.session_state.driver_data_cache = {}
-
-    # Check if data already in session cache (instant)
-    if driver_code in st.session_state.driver_data_cache:
-        all_data = st.session_state.driver_data_cache[driver_code]
+    # GET DATA FROM PRE-LOADED CACHE (NO DATABASE HIT - INSTANT!)
+    if driver_code in st.session_state.all_drivers_cache:
+        all_data = st.session_state.all_drivers_cache[driver_code]
     else:
-        # First time loading this driver - show spinner
-        with st.spinner(f'Loading data for {driver_name}...'):
-            # Single database call gets ALL data including processed safety dictionaries
-            all_data = get_all_driver_data(engine, driver_code, start_date, end_date)
-            # Store in session cache for instant switching
-            st.session_state.driver_data_cache[driver_code] = all_data
+        st.warning(f"No data found for {driver_name} [{driver_code}] in cache.")
+        return
 
-    # Extract safety data from combined result
+    # Extract data from cache (INSTANT - no database hit!)
     safety_data = all_data['safety_data']
     intangles_safety = all_data['intangles_safety']
 
