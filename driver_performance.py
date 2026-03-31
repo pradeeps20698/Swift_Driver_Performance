@@ -325,6 +325,121 @@ def get_driver_info(_engine, driver_code):
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def get_all_driver_data(_engine, driver_code, start_date, end_date):
+    """Fetch all driver data in a single database connection for better performance."""
+    try:
+        with _engine.connect() as conn:
+            # Query 1: Trip data
+            trip_query = f"""
+            SELECT * FROM swift_trip_log
+            WHERE driver_code = '{driver_code}'
+            AND loading_date >= '{start_date}'
+            AND loading_date <= '{end_date}'
+            ORDER BY loading_date DESC
+            """
+            trip_result = conn.execute(text(trip_query))
+            trip_rows = trip_result.fetchall()
+            trip_df = pd.DataFrame(trip_rows, columns=trip_result.keys()) if trip_rows else pd.DataFrame()
+
+            # Query 2: Driver info
+            info_query = f"""
+            SELECT code, name, guarantor, closing_balance, current_vehicle_number, app_date, unsettled_advance
+            FROM swift_drivers
+            WHERE code = '{driver_code}'
+            """
+            info_result = conn.execute(text(info_query))
+            info_rows = info_result.fetchall()
+            driver_info = pd.DataFrame(info_rows, columns=info_result.keys()) if info_rows else pd.DataFrame()
+
+            # Query 3: Challan data
+            challan_query = f"""
+            SELECT * FROM challan_data
+            WHERE driver_code = '{driver_code}'
+            AND challan_date >= '{start_date}'
+            AND challan_date <= '{end_date}'
+            ORDER BY challan_date DESC
+            """
+            challan_result = conn.execute(text(challan_query))
+            challan_rows = challan_result.fetchall()
+            challan_df = pd.DataFrame(challan_rows, columns=challan_result.keys()) if challan_rows else pd.DataFrame()
+
+            # Query 4: Repair data
+            repair_query = f"""
+            SELECT * FROM deduction_data
+            WHERE driver_code = '{driver_code}'
+            AND transaction_date >= '{start_date}'
+            AND transaction_date <= '{end_date}'
+            AND type = 'Repair'
+            ORDER BY transaction_date DESC
+            """
+            repair_result = conn.execute(text(repair_query))
+            repair_rows = repair_result.fetchall()
+            repair_df = pd.DataFrame(repair_rows, columns=repair_result.keys()) if repair_rows else pd.DataFrame()
+
+            # Query 5: POD damage data
+            pod_query = f"""
+            SELECT cn.*, stl.loading_date, stl.driver_code
+            FROM cn_data cn
+            INNER JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
+            WHERE stl.driver_code = '{driver_code}'
+            AND stl.loading_date >= '{start_date}'
+            AND stl.loading_date <= '{end_date}'
+            AND (
+                cn.pod_status ILIKE '%Delay%'
+                OR cn.pod_status ILIKE '%NOT OK%'
+                OR cn.pod_status ILIKE '%NOT OKAY%'
+            )
+            ORDER BY stl.loading_date DESC
+            """
+            pod_result = conn.execute(text(pod_query))
+            pod_rows = pod_result.fetchall()
+            pod_damage_df = pd.DataFrame(pod_rows, columns=pod_result.keys()) if pod_rows else pd.DataFrame()
+
+            # Query 6: Safety data (day_wise_gps_km)
+            safety_query = f"""
+            SELECT * FROM day_wise_gps_km
+            WHERE driver_code = '{driver_code}'
+            AND date >= '{start_date}'
+            AND date <= '{end_date}'
+            ORDER BY date DESC
+            """
+            safety_result = conn.execute(text(safety_query))
+            safety_rows = safety_result.fetchall()
+            safety_data = pd.DataFrame(safety_rows, columns=safety_result.keys()) if safety_rows else pd.DataFrame()
+
+            # Query 7: Intangles safety data
+            intangles_query = f"""
+            SELECT * FROM intangles_alert_data
+            WHERE driver_code = '{driver_code}'
+            AND event_date >= '{start_date}'
+            AND event_date <= '{end_date}'
+            ORDER BY event_date DESC
+            """
+            intangles_result = conn.execute(text(intangles_query))
+            intangles_rows = intangles_result.fetchall()
+            intangles_safety = pd.DataFrame(intangles_rows, columns=intangles_result.keys()) if intangles_rows else pd.DataFrame()
+
+            return {
+                'trip_df': trip_df,
+                'driver_info': driver_info,
+                'challan_df': challan_df,
+                'repair_df': repair_df,
+                'pod_damage_df': pod_damage_df,
+                'safety_data': safety_data,
+                'intangles_safety': intangles_safety
+            }
+    except Exception as e:
+        return {
+            'trip_df': pd.DataFrame(),
+            'driver_info': pd.DataFrame(),
+            'challan_df': pd.DataFrame(),
+            'repair_df': pd.DataFrame(),
+            'pod_damage_df': pd.DataFrame(),
+            'safety_data': pd.DataFrame(),
+            'intangles_safety': pd.DataFrame()
+        }
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_security_from_excel(driver_code):
     """Get security submitted from Excel file based on driver code."""
     try:
@@ -1587,19 +1702,20 @@ def show_overall_performance(engine):
 
     if need_fetch:
         with st.spinner(f'Loading data for {driver_name}...'):
-            # Fetch all data
-            trip_df = get_trip_data(engine, driver_code, start_date, end_date)
+            # Fetch all data in single connection (faster)
+            all_data = get_all_driver_data(engine, driver_code, start_date, end_date)
 
+            trip_df = all_data['trip_df']
             if trip_df.empty:
                 st.warning(f"No trip data found for {driver_name} [{driver_code}] in the selected date range.")
                 return
 
-            driver_info = get_driver_info(engine, driver_code)
-            challan_df = get_challan_data(engine, driver_code, start_date, end_date)
-            repair_df = get_repair_data(engine, driver_code, start_date, end_date)
-            pod_damage_df = get_pod_damage_data(engine, driver_code, start_date, end_date)
-            safety_data = get_safety_data(engine, driver_code, start_date, end_date)
-            intangles_safety = get_intangles_safety_data(engine, driver_code, start_date, end_date)
+            driver_info = all_data['driver_info']
+            challan_df = all_data['challan_df']
+            repair_df = all_data['repair_df']
+            pod_damage_df = all_data['pod_damage_df']
+            safety_data = all_data['safety_data']
+            intangles_safety = all_data['intangles_safety']
 
             # Store in session state
             st.session_state.cached_driver_code = driver_code
