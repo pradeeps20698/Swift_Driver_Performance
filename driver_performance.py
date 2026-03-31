@@ -1717,7 +1717,7 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         st.error(f"Error loading low performance data: {e}")
         return pd.DataFrame()
 
-@st.cache_resource(ttl=3600, show_spinner="📦 Loading all drivers data (one-time, refreshes hourly)...")
+@st.cache_resource(ttl=3600, show_spinner=False)
 def preload_all_drivers_cache(_engine):
     """Pre-load ALL drivers data at startup using BULK queries. Much faster than per-driver queries."""
     start_str = "2025-09-01"
