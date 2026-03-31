@@ -1,5 +1,5 @@
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -19,10 +19,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
-
-# Auto-refresh every 30 minutes (1800000 milliseconds)
-# This clears cache and fetches fresh data automatically
-st_autorefresh(interval=1800000, limit=None, key="data_refresh")
 
 # Custom CSS - Dark Mode Professional Theme
 st.markdown("""
@@ -2128,9 +2124,21 @@ def show_overall_performance(engine):
     st.markdown(f"""
     <div style="text-align: center; padding: 25px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); border-radius: 15px; color: white; margin-top: 20px; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 8px 32px rgba(0,0,0,0.3);">
         <p style="margin: 0; color: #00d4ff;">📅 Data Period: {start_date} to {end_date} | 🕐 Last Refreshed: {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
-        <p style="margin: 8px 0 0 0; font-size: 0.85rem; color: #a0aec0;">Swift Road Link - Driver Performance Dashboard</p>
+        <p style="margin: 8px 0 0 0; font-size: 0.85rem; color: #a0aec0;">Swift Road Link - Driver Performance Dashboard | Auto-refresh: 30 min</p>
     </div>
     """, unsafe_allow_html=True)
+
+    # Auto-refresh every 30 minutes (1800 seconds)
+    components.html(
+        """
+        <script>
+            setTimeout(function() {
+                window.parent.location.reload();
+            }, 1800000);
+        </script>
+        """,
+        height=0
+    )
 
 if __name__ == "__main__":
     main()
