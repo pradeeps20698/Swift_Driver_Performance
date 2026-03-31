@@ -1493,6 +1493,15 @@ def main():
         st.error("Unable to connect to the database.")
         st.stop()
 
+    # Pre-warm cache for default driver (D1216) on first app load
+    if 'cache_warmed' not in st.session_state:
+        start_date = datetime(2025, 9, 1)
+        end_date = datetime.now()
+        # Pre-load default driver data (this will be cached)
+        get_all_driver_data(engine, 'D1216', start_date, end_date)
+        get_all_drivers(engine)
+        st.session_state.cache_warmed = True
+
     # Create tabs
     tab1, tab2 = st.tabs(["📊 Overall Performance", "⚠️ Low Performance Driver"])
 
