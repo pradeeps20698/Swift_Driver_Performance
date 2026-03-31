@@ -2307,24 +2307,33 @@ def show_overall_performance(engine):
             f"{contribution_pct:.2f}%"
         ]
 
-    # Calculate totals
-    total_revenue = trip_df['freight'].sum()
-    total_qty = trip_df['car_qty'].sum()
-    loaded_trips = len(trip_df[trip_df['trip_status'] == 'Loaded'])
-    loaded_kms = trip_df[trip_df['trip_status'] == 'Loaded']['distance'].sum()
-    empty_kms = trip_df[trip_df['trip_status'] == 'Empty']['distance'].sum()
-    total_kms = trip_df['distance'].sum()
-    total_gps_km = gps_km_data.get('total', 0)
-    total_repair = repair_df['amount'].sum() if not repair_df.empty else 0
-    total_advance = trip_df['tl_cash_advance'].sum() + trip_df['tl_diesel_advance'].sum() + trip_df['e_toll'].sum()
+    # Calculate totals (only for displayed months)
+    displayed_trip_df = trip_df[trip_df['month'].isin(months)]
+    total_revenue = displayed_trip_df['freight'].sum()
+    total_qty = displayed_trip_df['car_qty'].sum()
+    loaded_trips = len(displayed_trip_df[displayed_trip_df['trip_status'] == 'Loaded'])
+    loaded_kms = displayed_trip_df[displayed_trip_df['trip_status'] == 'Loaded']['distance'].sum()
+    empty_kms = displayed_trip_df[displayed_trip_df['trip_status'] == 'Empty']['distance'].sum()
+    total_kms = displayed_trip_df['distance'].sum()
+    total_gps_km = sum(gps_km_data.get(m, 0) for m in months)
+    displayed_repair_df = repair_df[pd.to_datetime(repair_df['effective_date']).dt.to_period('M').astype(str).isin(months)] if not repair_df.empty else pd.DataFrame()
+    total_repair = displayed_repair_df['amount'].sum() if not displayed_repair_df.empty else 0
+    total_advance = displayed_trip_df['tl_cash_advance'].sum() + displayed_trip_df['tl_diesel_advance'].sum() + displayed_trip_df['e_toll'].sum()
     total_contribution = total_revenue - total_repair - total_advance
     total_contribution_pct = (total_contribution / total_revenue * 100) if total_revenue > 0 else 0
 
-    # Calculate total delays for all loaded trips
-    total_delays = count_delays_for_trips(trip_df)
+    # Calculate total delays for displayed months only
+    total_delays = count_delays_for_trips(displayed_trip_df)
 
-    # Calculate total POD damage qty
-    total_pod_damage = pod_damage_df['qty'].sum() if not pod_damage_df.empty and 'qty' in pod_damage_df.columns else 0
+    # Calculate total POD damage qty for displayed months
+    if not pod_damage_df.empty:
+        pod_df_temp = pod_damage_df.copy()
+        pod_df_temp['loading_date'] = pd.to_datetime(pod_df_temp['loading_date'], errors='coerce')
+        pod_df_temp['month'] = pod_df_temp['loading_date'].dt.to_period('M').astype(str)
+        displayed_pod_df = pod_df_temp[pod_df_temp['month'].isin(months)]
+        total_pod_damage = displayed_pod_df['qty'].sum() if not displayed_pod_df.empty and 'qty' in displayed_pod_df.columns else 0
+    else:
+        total_pod_damage = 0
 
     metrics_data['Total'] = [
         f"₹{total_revenue:,.0f}",
@@ -2438,18 +2447,21 @@ def show_overall_performance(engine):
                 f"₹{enroute_repair_month:,.0f}"
             ]
 
-        # Calculate totals
-        challan_count = len(challan_df) if not challan_df.empty else 0
-        challan_amount = challan_df['amount'].sum() if not challan_df.empty else 0
-        branch_repair = repair_df[repair_df['dr_party'].str.contains('Branch', case=False, na=False)]['amount'].sum() if not repair_df.empty else 0
-        enroute_repair = repair_df[repair_df['dr_party'].str.contains('Enroute', case=False, na=False)]['amount'].sum() if not repair_df.empty else 0
+        # Calculate totals (only for displayed months)
+        displayed_challan = challan_df_temp[challan_df_temp['month'].isin(months)] if not challan_df_temp.empty else pd.DataFrame()
+        challan_count = len(displayed_challan)
+        challan_amount = displayed_challan['amount'].sum() if not displayed_challan.empty else 0
+        displayed_repair = repair_df_temp[repair_df_temp['month'].isin(months)] if not repair_df_temp.empty else pd.DataFrame()
+        total_repair_disp = displayed_repair['amount'].sum() if not displayed_repair.empty else 0
+        branch_repair = displayed_repair[displayed_repair['dr_party'].str.contains('Branch', case=False, na=False)]['amount'].sum() if not displayed_repair.empty else 0
+        enroute_repair = displayed_repair[displayed_repair['dr_party'].str.contains('Enroute', case=False, na=False)]['amount'].sum() if not displayed_repair.empty else 0
 
         behaviour_data['Total'] = [
             "0",  # At Home Count - would need attendance data
             "0",  # At Home Days
             f"{challan_count}",
             f"₹{challan_amount:,.0f}",
-            f"₹{total_repair:,.0f}",
+            f"₹{total_repair_disp:,.0f}",
             f"₹{branch_repair:,.0f}",
             f"₹{enroute_repair:,.0f}"
         ]
@@ -2506,14 +2518,14 @@ def show_overall_performance(engine):
                 f"{idling_fuel:.2f}"
             ]
 
-        # Add totals
-        total_overspeed = safety_data['overspeeding'].get('total', 0)
-        total_night_drives = safety_data['night_drives'].get('total', 0)
-        total_hard_brake = intangles_safety['hard_brake'].get('total', 0)
-        total_harsh_acc = intangles_safety['harsh_acc'].get('total', 0)
-        total_freerun = intangles_safety['freerun'].get('total', 0)
-        total_idling_time = intangles_safety['idling_time'].get('total', 0)
-        total_idling_fuel = intangles_safety['idling_fuel'].get('total', 0)
+        # Add totals (only for displayed months)
+        total_overspeed = sum(safety_data['overspeeding'].get(m, 0) for m in months)
+        total_night_drives = sum(safety_data['night_drives'].get(m, 0) for m in months)
+        total_hard_brake = sum(intangles_safety['hard_brake'].get(m, 0) for m in months)
+        total_harsh_acc = sum(intangles_safety['harsh_acc'].get(m, 0) for m in months)
+        total_freerun = sum(intangles_safety['freerun'].get(m, 0) for m in months)
+        total_idling_time = sum(intangles_safety['idling_time'].get(m, 0) for m in months)
+        total_idling_fuel = sum(intangles_safety['idling_fuel'].get(m, 0) for m in months)
 
         safety_table_data['Total'] = [
             f"{total_overspeed}",
