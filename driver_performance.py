@@ -1717,7 +1717,7 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         st.error(f"Error loading low performance data: {e}")
         return pd.DataFrame()
 
-@st.cache_resource(ttl=3600)
+@st.cache_resource(ttl=3600, show_spinner="📦 Loading all drivers data (one-time, refreshes hourly)...")
 def preload_all_drivers_cache(_engine):
     """Pre-load ALL drivers data at startup using BULK queries. Much faster than per-driver queries."""
     start_str = "2025-09-01"
@@ -1889,15 +1889,15 @@ def main():
         st.stop()
 
     # Pre-load ALL drivers data (cached for 1 hour)
-    with st.spinner('📦 Loading all drivers data to cache... (one-time, refreshes every hour)'):
-        all_drivers_cache = preload_all_drivers_cache(engine)
+    # Cache is loaded ONCE and shared across all users - no spinner needed for cache hits
+    all_drivers_cache = preload_all_drivers_cache(engine)
 
     if not all_drivers_cache:
         st.error("Failed to load cache. Please refresh.")
         st.stop()
 
-    # Show cache info in sidebar
-    st.sidebar.success(f"📦 Cache Loaded: {len(all_drivers_cache)} drivers\n\n✅ All drivers ready\n\n🕐 Auto-refresh: 1 hour")
+    # Show cache status in sidebar
+    st.sidebar.success(f"📦 {len(all_drivers_cache)} drivers ready")
 
     # Store in session state for access
     st.session_state.all_drivers_cache = all_drivers_cache
