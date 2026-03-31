@@ -558,29 +558,100 @@ def get_all_driver_data(_engine, driver_code, start_str, end_str):
             pod_rows = pod_result.fetchall()
             pod_damage_df = pd.DataFrame(pod_rows, columns=pod_result.keys()) if pod_rows else pd.DataFrame()
 
-            # Query 6: Safety data (day_wise_gps_km)
-            safety_query = f"""
-            SELECT * FROM day_wise_gps_km
+            # Query 6: Safety data aggregated (night drives, overspeeding)
+            safety_agg_query = f"""
+            SELECT TO_CHAR(date, 'YYYY-MM') as month,
+                   COUNT(CASE WHEN overspeed > 0 THEN 1 END) as overspeed_count,
+                   COUNT(CASE WHEN night_drive > 0 THEN 1 END) as night_drive_count
+            FROM day_wise_gps_km
             WHERE driver_code = '{driver_code}'
             AND date >= '{start_str}'
             AND date <= '{end_str}'
-            ORDER BY date DESC
+            GROUP BY TO_CHAR(date, 'YYYY-MM')
+            ORDER BY month
             """
-            safety_result = conn.execute(text(safety_query))
+            safety_result = conn.execute(text(safety_agg_query))
             safety_rows = safety_result.fetchall()
-            safety_data = pd.DataFrame(safety_rows, columns=safety_result.keys()) if safety_rows else pd.DataFrame()
 
-            # Query 7: Intangles safety data
-            intangles_query = f"""
-            SELECT * FROM intangles_alert_logs
+            # Process into dictionary format
+            monthly_night_drives = {}
+            monthly_overspeeding = {}
+            total_night_drives = 0
+            total_overspeeding = 0
+            for row in safety_rows:
+                if row[0]:
+                    month = row[0]
+                    overspeed = int(row[1]) if row[1] else 0
+                    night_drive = int(row[2]) if row[2] else 0
+                    monthly_overspeeding[month] = overspeed
+                    monthly_night_drives[month] = night_drive
+                    total_overspeeding += overspeed
+                    total_night_drives += night_drive
+            monthly_night_drives['total'] = total_night_drives
+            monthly_overspeeding['total'] = total_overspeeding
+            safety_data = {'night_drives': monthly_night_drives, 'overspeeding': monthly_overspeeding}
+
+            # Query 7: Intangles safety data aggregated
+            intangles_agg_query = f"""
+            SELECT
+                TO_CHAR(event_time, 'YYYY-MM') as month,
+                COUNT(DISTINCT CASE WHEN alert_type = 'hard_brake' THEN DATE(event_time) END) as hard_brake_days,
+                COUNT(DISTINCT CASE WHEN alert_type = 'freerun' THEN DATE(event_time) END) as freerun_days,
+                COUNT(CASE WHEN alert_type = 'over_acc' THEN 1 END) as harsh_acc_count,
+                COALESCE(SUM(CASE WHEN alert_type = 'idling' AND start_time IS NOT NULL AND end_time IS NOT NULL
+                              THEN (end_time - start_time) / 60.0 ELSE 0 END), 0) as idling_time_mins,
+                COALESCE(SUM(CASE WHEN alert_type = 'idling' THEN fuel_consumed ELSE 0 END), 0) as idling_fuel
+            FROM intangles_alert_logs
             WHERE driver_code = '{driver_code}'
             AND event_time >= '{start_str}'
             AND event_time <= '{end_str}'
-            ORDER BY event_time DESC
+            GROUP BY TO_CHAR(event_time, 'YYYY-MM')
+            ORDER BY month
             """
-            intangles_result = conn.execute(text(intangles_query))
+            intangles_result = conn.execute(text(intangles_agg_query))
             intangles_rows = intangles_result.fetchall()
-            intangles_safety = pd.DataFrame(intangles_rows, columns=intangles_result.keys()) if intangles_rows else pd.DataFrame()
+
+            # Process into dictionary format
+            monthly_hard_brake = {}
+            monthly_freerun = {}
+            monthly_harsh_acc = {}
+            monthly_idling_time = {}
+            monthly_idling_fuel = {}
+            total_hard_brake = 0
+            total_freerun = 0
+            total_harsh_acc = 0
+            total_idling_time = 0
+            total_idling_fuel = 0
+            for row in intangles_rows:
+                if row[0]:
+                    month = row[0]
+                    hard_brake = int(row[1]) if row[1] else 0
+                    freerun = int(row[2]) if row[2] else 0
+                    harsh_acc = int(row[3]) if row[3] else 0
+                    idling_time = float(row[4]) if row[4] else 0
+                    idling_fuel = float(row[5]) if row[5] else 0
+                    monthly_hard_brake[month] = hard_brake
+                    monthly_freerun[month] = freerun
+                    monthly_harsh_acc[month] = harsh_acc
+                    monthly_idling_time[month] = round(idling_time, 1)
+                    monthly_idling_fuel[month] = round(idling_fuel, 2)
+                    total_hard_brake += hard_brake
+                    total_freerun += freerun
+                    total_harsh_acc += harsh_acc
+                    total_idling_time += idling_time
+                    total_idling_fuel += idling_fuel
+            monthly_hard_brake['total'] = total_hard_brake
+            monthly_freerun['total'] = total_freerun
+            monthly_harsh_acc['total'] = total_harsh_acc
+            monthly_idling_time['total'] = round(total_idling_time, 1)
+            monthly_idling_fuel['total'] = round(total_idling_fuel, 2)
+            intangles_safety = {
+                'hard_brake': monthly_hard_brake,
+                'freerun': monthly_freerun,
+                'harsh_acc': monthly_harsh_acc,
+                'idling_time': monthly_idling_time,
+                'idling_fuel': monthly_idling_fuel
+            }
 
             return {
                 'trip_df': trip_df,
@@ -1864,23 +1935,18 @@ def show_overall_performance(engine):
 
     # Check if data already in session cache (instant)
     if driver_code in st.session_state.driver_data_cache:
-        cached = st.session_state.driver_data_cache[driver_code]
-        all_data = cached['all_data']
-        safety_data = cached['safety_data']
-        intangles_safety = cached['intangles_safety']
+        all_data = st.session_state.driver_data_cache[driver_code]
     else:
         # First time loading this driver - show spinner
         with st.spinner(f'Loading data for {driver_name}...'):
+            # Single database call gets ALL data including processed safety dictionaries
             all_data = get_all_driver_data(engine, driver_code, start_date, end_date)
-            safety_data = get_safety_data(engine, driver_code, start_date, end_date)
-            intangles_safety = get_intangles_safety_data(engine, driver_code, start_date, end_date)
-
             # Store in session cache for instant switching
-            st.session_state.driver_data_cache[driver_code] = {
-                'all_data': all_data,
-                'safety_data': safety_data,
-                'intangles_safety': intangles_safety
-            }
+            st.session_state.driver_data_cache[driver_code] = all_data
+
+    # Extract safety data from combined result
+    safety_data = all_data['safety_data']
+    intangles_safety = all_data['intangles_safety']
 
     trip_df = all_data['trip_df']
     if trip_df.empty:
