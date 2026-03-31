@@ -1645,32 +1645,14 @@ def main():
         st.error("Unable to connect to the database.")
         st.stop()
 
-    # Initialize cache store
-    cache_store = get_cache_store()
-
-    # Load all data to cache if empty or stale (auto-refresh every 1 hour)
-    if is_cache_stale(cache_store) and not cache_store['is_loading']:
-        cache_store['is_loading'] = True
-        with st.spinner('🔄 Loading data to cache store... (This happens once every hour)'):
-            success = load_all_data_to_cache(engine, cache_store)
-        if success and cache_store['last_updated']:
-            st.success(f"✅ Cache updated at {cache_store['last_updated'].strftime('%H:%M:%S')}")
-        else:
-            st.error("❌ Failed to load cache. Please refresh the page.")
-
-    # Show cache status in sidebar
-    if cache_store['last_updated']:
-        next_refresh = cache_store['last_updated'] + timedelta(seconds=CACHE_REFRESH_INTERVAL)
-        time_remaining = (next_refresh - datetime.now()).total_seconds()
-        if time_remaining > 0:
-            mins_remaining = int(time_remaining // 60)
-            st.sidebar.success(f"📦 Cache Store Active\n\n🕐 Last Updated: {cache_store['last_updated'].strftime('%H:%M:%S')}\n\n⏱️ Next Refresh: {mins_remaining} min")
+    # Show cache info in sidebar
+    st.sidebar.success(f"📦 Cache Active (1 hour TTL)\n\n🕐 Data cached after first load\n\n⏱️ Auto-refresh: 30 min")
 
     # Create tabs
     tab1, tab2 = st.tabs(["📊 Overall Performance", "⚠️ Low Performance Driver"])
 
     with tab1:
-        show_overall_performance(engine, cache_store)
+        show_overall_performance(engine)
 
     with tab2:
         show_low_performance_drivers(engine)
@@ -1827,13 +1809,13 @@ def show_low_performance_drivers(engine):
     else:
         st.info("No drivers match the selected filter criteria.")
 
-def show_overall_performance(engine, cache_store):
-    """Show overall performance tab (existing dashboard) - ALWAYS USES CACHE STORE."""
+def show_overall_performance(engine):
+    """Show overall performance tab - Uses @st.cache_data for 1 hour caching."""
 
-    # Get all drivers from cache store (NO DATABASE HIT)
-    all_drivers = get_drivers_list_from_cache(cache_store)
-    if all_drivers is None or all_drivers.empty:
-        st.error("Cache store is empty. Please wait for data to load.")
+    # Get all drivers (cached for 1 hour)
+    all_drivers = get_all_drivers(engine)
+    if all_drivers.empty:
+        st.error("No drivers found in database. Please check database connection.")
         return
 
     # Driver Selector Section
@@ -1864,25 +1846,21 @@ def show_overall_performance(engine, cache_store):
     start_date = datetime(2025, 9, 1)
     end_date = datetime.now()
 
-    # Get driver data from CACHE STORE (NO DATABASE HIT - INSTANT!)
-    cached_data = get_driver_data_from_cache(cache_store, driver_code)
+    # Get driver data (cached for 1 hour via @st.cache_data)
+    with st.spinner(f'Loading data for {driver_name}...'):
+        all_data = get_all_driver_data(engine, driver_code, start_date, end_date)
 
-    if cached_data is None:
-        st.warning(f"No data found for {driver_name} [{driver_code}] in cache store.")
-        return
-
-    # Use cached data directly (INSTANT - no database hit)
-    trip_df = cached_data['trip_df']
+    trip_df = all_data['trip_df']
     if trip_df.empty:
         st.warning(f"No trip data found for {driver_name} [{driver_code}] in the selected date range.")
         return
 
-    driver_info = cached_data['driver_info']
-    challan_df = cached_data['challan_df']
-    repair_df = cached_data['repair_df']
-    pod_damage_df = cached_data['pod_damage_df']
-    safety_data = cached_data['safety_data']
-    intangles_safety = cached_data['intangles_safety']
+    driver_info = all_data['driver_info']
+    challan_df = all_data['challan_df']
+    repair_df = all_data['repair_df']
+    pod_damage_df = all_data['pod_damage_df']
+    safety_data = all_data['safety_data']
+    intangles_safety = all_data['intangles_safety']
 
     closing_balance = driver_info['closing_balance'].values[0] if not driver_info.empty else 0
 
