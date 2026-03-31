@@ -2006,6 +2006,9 @@ def show_overall_performance(engine):
     """Show overall performance tab - Uses PRE-LOADED CACHE (no database hit)."""
 
     # Get drivers list from pre-loaded cache (NO DATABASE HIT!)
+    if 'all_drivers_cache' not in st.session_state:
+        st.error("Cache not initialized. Please refresh the page.")
+        return
     cache = st.session_state.all_drivers_cache
     if not cache:
         st.error("Cache is empty. Please refresh the page.")
