@@ -266,11 +266,20 @@ st.markdown("""
 @st.cache_resource
 def get_database_connection():
     try:
-        host = os.getenv('Host', 'swift.cj8i0e86a294.ap-south-1.rds.amazonaws.com')
-        username = os.getenv('UserName', 'pradeep')
-        password = os.getenv('Password', 'Amit__0411')
-        port = os.getenv('Port', '5432')
-        database = os.getenv('database_name', 'postgres')
+        # Try Streamlit secrets first, then env vars, then defaults
+        if hasattr(st, 'secrets') and 'database' in st.secrets:
+            host = st.secrets.database.get('Host', 'swift.cj8i0e86a294.ap-south-1.rds.amazonaws.com')
+            username = st.secrets.database.get('UserName', 'pradeep')
+            password = st.secrets.database.get('Password', 'Amit__0411')
+            port = st.secrets.database.get('Port', '5432')
+            database = st.secrets.database.get('database_name', 'postgres')
+        else:
+            host = os.getenv('Host', 'swift.cj8i0e86a294.ap-south-1.rds.amazonaws.com')
+            username = os.getenv('UserName', 'pradeep')
+            password = os.getenv('Password', 'Amit__0411')
+            port = os.getenv('Port', '5432')
+            database = os.getenv('database_name', 'postgres')
+
         connection_string = f"postgresql://{username}:{password}@{host}:{port}/{database}"
         engine = create_engine(
             connection_string,
@@ -281,6 +290,9 @@ def get_database_connection():
             pool_pre_ping=True,
             pool_recycle=300
         )
+        # Test connection
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
         return engine
     except Exception as e:
         st.error(f"Database connection failed: {e}")
@@ -582,6 +594,7 @@ def get_all_driver_data(_engine, driver_code, start_str, end_str):
                 'intangles_safety': intangles_safety
             }
     except Exception as e:
+        st.error(f"Database error: {str(e)}")
         return {
             'trip_df': pd.DataFrame(),
             'driver_info': pd.DataFrame(),
