@@ -368,10 +368,9 @@ def load_all_data_to_cache(_engine, cache_store):
 
                     # Repair data
                     repair_query = f"""
-                    SELECT * FROM deduction_data
+                    SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data
                     WHERE driver_code = '{driver_code}'
-                    AND transaction_date >= '{start_date}' AND transaction_date <= '{end_date}'
-                    AND type = 'Repair'
+                    AND COALESCE(voucher_date, doe) >= '{start_date}' AND COALESCE(voucher_date, doe) <= '{end_date}'
                     """
                     repair_result = conn.execute(text(repair_query))
                     repair_rows = repair_result.fetchall()
@@ -530,12 +529,11 @@ def get_all_driver_data(_engine, driver_code, start_str, end_str):
 
             # Query 4: Repair data
             repair_query = f"""
-            SELECT * FROM deduction_data
+            SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data
             WHERE driver_code = '{driver_code}'
-            AND transaction_date >= '{start_str}'
-            AND transaction_date <= '{end_str}'
-            AND type = 'Repair'
-            ORDER BY transaction_date DESC
+            AND COALESCE(voucher_date, doe) >= '{start_str}'
+            AND COALESCE(voucher_date, doe) <= '{end_str}'
+            ORDER BY effective_date DESC
             """
             repair_result = conn.execute(text(repair_query))
             repair_rows = repair_result.fetchall()
