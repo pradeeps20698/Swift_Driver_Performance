@@ -1153,6 +1153,8 @@ def create_styled_table(df):
     <style>
         .perf-table {
             width: 100%;
+            height: 395px;
+            table-layout: fixed;
             border-collapse: collapse;
             font-size: 14px;
             margin: 10px 0;
@@ -1163,40 +1165,33 @@ def create_styled_table(df):
         .perf-table th {
             background: linear-gradient(135deg, #0077b6 0%, #00b4d8 100%);
             color: #ffffff;
-            padding: 14px 12px;
+            padding: 8px 10px;
             text-align: center;
+            vertical-align: middle;
             border: 1px solid #005f8a;
             font-weight: 700;
-            font-size: 13px;
+            font-size: 16px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
         .perf-table th:first-child {
             text-align: left;
-            min-width: 200px;
-        }
-        .perf-table th:nth-child(2) {
-            text-align: left;
-            min-width: 120px;
+            width: 290px;
         }
         .perf-table td {
-            padding: 12px;
+            padding: 8px 10px;
             border: 1px solid #3a3a5a;
             background-color: #0e1117;
             color: #e0e0e0;
-            text-align: right;
-            font-size: 13px;
+            text-align: center;
+            vertical-align: middle;
+            font-size: 17px;
         }
         .perf-table td:first-child {
             text-align: left;
             font-weight: 600;
             color: #ffffff;
             background-color: #1a1a2e;
-        }
-        .perf-table td:nth-child(2) {
-            text-align: left;
-            color: #a0aec0;
-            font-style: italic;
         }
         .perf-table td:last-child {
             background-color: #1a2d3d;
@@ -2252,11 +2247,10 @@ def show_overall_performance(engine):
 
     # Performance metrics table
     metrics_data = {
-        'Event': ['Total Revenue', 'Total no. Qty', 'Loaded Trip Count', 'Loaded KMS',
-                  'Empty KMS', 'Total Running KMs', 'GPS KMs', 'Total Delays', 'POD Damage',
-                  'Total Repair Cost', 'Total Cash/Diesel Advance & E-Toll Given', 'Total Contribution', 'Contribution %'],
-        'Measurement': ['In Rs', 'In No of Cars Lifted', 'In No. of Trips', 'In KM', 'In KM', 'In KM',
-                       'In KM', 'In No. of Trips', 'In No of Cars', 'In Rs', 'In Rs', 'In Rs', '%']
+        'Event': ['Total Revenue (In Rs)', 'Loaded KMS (In KM)', 'Empty KMS (In KM)',
+                  'Total Running KMs (In KM)', 'GPS KMs (In KM)',
+                  'Total Car lifted (In No of Cars Lifted)', 'POD Damage (No of Cars)',
+                  'No of Loaded Trips (In No. of Trips)', 'Total Delays (No. of Trips)']
     }
 
     for month in months:
@@ -2297,18 +2291,14 @@ def show_overall_performance(engine):
 
         metrics_data[month] = [
             f"₹{total_revenue:,.0f}",
-            f"{total_qty:.0f}",
-            f"{loaded_trips}",
             f"{loaded_kms:,.0f}",
             f"{empty_kms:,.0f}",
             f"{total_kms:,.0f}",
             f"{gps_km_month:,.0f}",
-            f"{month_delays}",  # Delays calculated
-            f"{int(pod_damage_qty)}",  # POD Damage qty
-            f"₹{repair_cost:,.0f}",
-            f"₹{advance_given:,.0f}",
-            f"₹{contribution:,.0f}",
-            f"{contribution_pct:.2f}%"
+            f"{total_qty:.0f}",
+            f"{int(pod_damage_qty)}",
+            f"{loaded_trips}",
+            f"{month_delays}",
         ]
 
     # Calculate totals (only for displayed months)
@@ -2341,25 +2331,20 @@ def show_overall_performance(engine):
 
     metrics_data['Total'] = [
         f"₹{total_revenue:,.0f}",
-        f"{total_qty:.0f}",
-        f"{loaded_trips}",
         f"{loaded_kms:,.0f}",
         f"{empty_kms:,.0f}",
         f"{total_kms:,.0f}",
         f"{total_gps_km:,.0f}",
-        f"{total_delays}",  # Total delays calculated
-        f"{int(total_pod_damage)}",  # Total POD Damage qty
-        f"₹{total_repair:,.0f}",
-        f"₹{total_advance:,.0f}",
-        f"₹{total_contribution:,.0f}",
-        f"{total_contribution_pct:.2f}%"
+        f"{total_qty:.0f}",
+        f"{int(total_pod_damage)}",
+        f"{loaded_trips}",
+        f"{total_delays}",
     ]
 
     perf_df = pd.DataFrame(metrics_data)
-    st.markdown(create_styled_table(perf_df), unsafe_allow_html=True)
 
-    # Average metrics with dark mode styling (based on last 3 months, excluding current month)
-    avg_months = months[:-1] if len(months) > 1 else months  # Exclude current month
+    # Average metrics (based on last 3 months, excluding current month)
+    avg_months = months[:-1] if len(months) > 1 else months
     avg_trip_df = trip_df[trip_df['month'].isin(avg_months)]
     avg_repair_df = repair_df[pd.to_datetime(repair_df['effective_date']).dt.to_period('M').astype(str).isin(avg_months)] if not repair_df.empty else pd.DataFrame()
 
@@ -2368,29 +2353,26 @@ def show_overall_performance(engine):
     avg_repair = avg_repair_df['amount'].sum() if not avg_repair_df.empty else 0
     num_avg_months = len(avg_months) if avg_months else 1
 
-    st.markdown("### 📊 Monthly Averages (Last 3 Months)")
-    col1, col2, col3 = st.columns(3)
-    with col1:
+    left_col, right_col = st.columns([1, 4])
+    with left_col:
         st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%); padding: 25px; border-radius: 15px; text-align: center; color: white; box-shadow: 0 8px 32px rgba(67,97,238,0.4); border: 1px solid rgba(255,255,255,0.1);">
-            <p style="margin:0; font-size: 0.9rem; opacity: 0.9;">Average Revenue Per Month</p>
-            <h2 style="margin: 12px 0 0 0; font-size: 1.8rem; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">₹{avg_revenue/num_avg_months:,.0f}</h2>
+        <div style="display: flex; flex-direction: column; gap: 12px; height: 395px; margin-top: 0;">
+            <div style="flex: 1; background: linear-gradient(135deg, #4361ee 0%, #3a0ca3 100%); padding: 18px; border-radius: 14px; text-align: center; color: white; box-shadow: 0 6px 20px rgba(67,97,238,0.4); border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; justify-content: center;">
+                <p style="margin:0; font-size: 1rem; opacity: 0.9;">Avg Revenue / Month</p>
+                <h3 style="margin: 10px 0 0 0; font-size: 1.7rem;">₹{avg_revenue/num_avg_months:,.0f}</h3>
+            </div>
+            <div style="flex: 1; background: linear-gradient(135deg, #06d6a0 0%, #118ab2 100%); padding: 18px; border-radius: 14px; text-align: center; color: white; box-shadow: 0 6px 20px rgba(6,214,160,0.4); border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; justify-content: center;">
+                <p style="margin:0; font-size: 1rem; opacity: 0.9;">Avg Running Kms / Month</p>
+                <h3 style="margin: 10px 0 0 0; font-size: 1.7rem;">{avg_kms/num_avg_months:,.0f}</h3>
+            </div>
+            <div style="flex: 1; background: linear-gradient(135deg, #f72585 0%, #7209b7 100%); padding: 18px; border-radius: 14px; text-align: center; color: white; box-shadow: 0 6px 20px rgba(247,37,133,0.4); border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; justify-content: center;">
+                <p style="margin:0; font-size: 1rem; opacity: 0.9;">Avg Repair Cost / Month</p>
+                <h3 style="margin: 10px 0 0 0; font-size: 1.7rem;">₹{avg_repair/num_avg_months:,.0f}</h3>
+            </div>
         </div>
         """, unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #06d6a0 0%, #118ab2 100%); padding: 25px; border-radius: 15px; text-align: center; color: white; box-shadow: 0 8px 32px rgba(6,214,160,0.4); border: 1px solid rgba(255,255,255,0.1);">
-            <p style="margin:0; font-size: 0.9rem; opacity: 0.9;">Average Running Kms Per Month</p>
-            <h2 style="margin: 12px 0 0 0; font-size: 1.8rem; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">{avg_kms/num_avg_months:,.0f}</h2>
-        </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, #f72585 0%, #7209b7 100%); padding: 25px; border-radius: 15px; text-align: center; color: white; box-shadow: 0 8px 32px rgba(247,37,133,0.4); border: 1px solid rgba(255,255,255,0.1);">
-            <p style="margin:0; font-size: 0.9rem; opacity: 0.9;">Average Repair Cost Per Month</p>
-            <h2 style="margin: 12px 0 0 0; font-size: 1.8rem; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">₹{avg_repair/num_avg_months:,.0f}</h2>
-        </div>
-        """, unsafe_allow_html=True)
+    with right_col:
+        st.markdown(create_styled_table(perf_df), unsafe_allow_html=True)
 
     st.markdown("---")
 
