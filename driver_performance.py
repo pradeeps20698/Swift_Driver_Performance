@@ -25,6 +25,10 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Require login + dashboard permission
+from swift_auth_child import require_dashboard_access
+_auth_user = require_dashboard_access("driver_performance")
+
 # Custom CSS - Dark Mode Professional Theme
 st.markdown("""
 <style>
