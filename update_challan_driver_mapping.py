@@ -14,13 +14,15 @@ Cron example (run at :05 and :35 past each hour):
 import psycopg2
 from datetime import datetime
 
+import os
+
 DB_CONFIG = {
-    "host": "swift.cj8i0e86a294.ap-south-1.rds.amazonaws.com",
-    "user": "pradeep",
-    "password": "Amit__0411",
-    "database": "postgres",
-    "port": 5432,
-    "connect_timeout": 30
+    "host": os.environ["Host"],
+    "user": os.environ["UserName"],
+    "password": os.environ["Password"],
+    "database": os.getenv("database_name", "postgres"),
+    "port": int(os.getenv("Port", "5432")),
+    "connect_timeout": 30,
 }
 
 

@@ -24,9 +24,9 @@ load_dotenv()
 def get_database_connection():
     """Create database connection."""
     try:
-        host = os.getenv('Host', 'swift.cj8i0e86a294.ap-south-1.rds.amazonaws.com')
-        username = os.getenv('UserName', 'pradeep')
-        password = os.getenv('Password', 'Amit__0411')
+        host = os.environ['Host']
+        username = os.environ['UserName']
+        password = os.environ['Password']
         port = os.getenv('Port', '5432')
         database = os.getenv('database_name', 'postgres')
         connection_string = f"postgresql://{username}:{password}@{host}:{port}/{database}"

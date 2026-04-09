@@ -270,17 +270,18 @@ st.markdown("""
 @st.cache_resource
 def get_database_connection():
     try:
-        # Try Streamlit secrets first, then env vars, then defaults
+        # Credentials must come from Streamlit secrets or environment variables.
+        # No defaults — fail loudly if not configured.
         if hasattr(st, 'secrets') and 'database' in st.secrets:
-            host = st.secrets.database.get('Host', 'swift.cj8i0e86a294.ap-south-1.rds.amazonaws.com')
-            username = st.secrets.database.get('UserName', 'pradeep')
-            password = st.secrets.database.get('Password', 'Amit__0411')
+            host = st.secrets.database['Host']
+            username = st.secrets.database['UserName']
+            password = st.secrets.database['Password']
             port = st.secrets.database.get('Port', '5432')
             database = st.secrets.database.get('database_name', 'postgres')
         else:
-            host = os.getenv('Host', 'swift.cj8i0e86a294.ap-south-1.rds.amazonaws.com')
-            username = os.getenv('UserName', 'pradeep')
-            password = os.getenv('Password', 'Amit__0411')
+            host = os.environ['Host']
+            username = os.environ['UserName']
+            password = os.environ['Password']
             port = os.getenv('Port', '5432')
             database = os.getenv('database_name', 'postgres')
 

@@ -16,11 +16,11 @@ import psycopg2
 from datetime import datetime
 
 DB_CONFIG = {
-    "host": "swift.cj8i0e86a294.ap-south-1.rds.amazonaws.com",
-    "user": "pradeep",
-    "password": "Amit__0411",
-    "database": "postgres",
-    "port": 5432,
+    "host": __import__("os").environ["Host"],
+    "user": __import__("os").environ["UserName"],
+    "password": __import__("os").environ["Password"],
+    "database": __import__("os").getenv("database_name", "postgres"),
+    "port": int(__import__("os").getenv("Port", "5432")),
     "connect_timeout": 30
 }
 
