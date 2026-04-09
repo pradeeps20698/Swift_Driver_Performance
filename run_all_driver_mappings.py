@@ -12,16 +12,20 @@ Usage:
     python3 run_all_driver_mappings.py
 """
 
+import os
 import psycopg2
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DB_CONFIG = {
-    "host": __import__("os").environ["Host"],
-    "user": __import__("os").environ["UserName"],
-    "password": __import__("os").environ["Password"],
-    "database": __import__("os").getenv("database_name", "postgres"),
-    "port": int(__import__("os").getenv("Port", "5432")),
-    "connect_timeout": 30
+    "host": os.environ["Host"],
+    "user": os.environ["UserName"],
+    "password": os.environ["Password"],
+    "database": os.getenv("database_name", "postgres"),
+    "port": int(os.getenv("Port", "5432")),
+    "connect_timeout": 30,
 }
 
 
