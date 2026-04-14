@@ -2815,8 +2815,10 @@ def show_fleet_manager(engine):
                        'hard_brake_days', 'harsh_acc_count', 'freerun_days', 'idling_time', 'idling_fuel', 'total_safety_violations']
         col_names = ['Fleet Manager', 'Active Vehicles', 'Overspeed (In No. of Days)', 'Night Drive (In No. of Days)', 'Hard Brake (In No. of Days)', 'Harsh Acc (In No. of Times)', 'Freerun (In No. of Days)', 'Idling Time (In Minutes)', 'Idling Fuel (In Litres)', 'Total']
     elif view_option == "Financial Details":
+        total_all_rev = perf_df['total_revenue'].sum()
+        perf_df['revenue_share_pct'] = perf_df.apply(lambda r: (r['total_revenue'] / total_all_rev * 100) if total_all_rev > 0 else 0, axis=1)
         display_cols = ['fleet_manager', 'active_vehicles', 'total_revenue', 'total_advance',
-                       'repair_amount', 'challan_count', 'challan_amount', 'contribution_pct']
+                       'repair_amount', 'challan_count', 'challan_amount', 'revenue_share_pct']
         col_names = ['Fleet Manager', 'Active Vehicles', 'Revenue', 'Advance', 'Repair', 'Challans', 'Challan Amt', 'Contrib %']
     else:
         display_cols = ['fleet_manager', 'active_vehicles', 'loaded_trip_count', 'total_revenue',
@@ -2832,8 +2834,8 @@ def show_fleet_manager(engine):
             display_df[col] = display_df[col].apply(lambda x: f"₹{x:,.0f}")
         elif col in ['total_running_kms', 'loaded_kms', 'empty_kms', 'gps_kms', 'avg_km']:
             display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}")
-        elif col in ['contribution_pct', 'delay_load_pct']:
-            display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}%")
+        elif col in ['contribution_pct', 'delay_load_pct', 'revenue_share_pct']:
+            display_df[col] = display_df[col].apply(lambda x: f"{x:.1f}%")
         elif col == 'idling_time':
             display_df[col] = display_df[col].apply(lambda x: f"{x:.1f}")
         elif col == 'idling_fuel':
@@ -2874,18 +2876,15 @@ def show_fleet_manager(engine):
 
         v_display = vehicle_perf_df[['vehicle_no', 'loaded_trip_count', 'total_revenue',
                                       'total_running_kms', 'delay_count', 'pod_damage_count',
-                                      'repair_amount', 'challan_count', 'total_safety_violations',
-                                      'contribution_pct']].copy()
+                                      'repair_amount', 'challan_count', 'total_safety_violations']].copy()
         for col in v_display.columns:
             if col in ['total_revenue', 'repair_amount', 'challan_amount', 'contribution']:
                 v_display[col] = v_display[col].apply(lambda x: f"₹{x:,.0f}")
             elif col in ['total_running_kms']:
                 v_display[col] = v_display[col].apply(lambda x: f"{x:,.0f}")
-            elif col == 'contribution_pct':
-                v_display[col] = v_display[col].apply(lambda x: f"{x:.1f}%")
 
         v_display.columns = ['Vehicle', 'Trips', 'Revenue', 'KMs', 'Delays', 'POD', 'Repair',
-                            'Challans', 'Safety', 'Contrib %']
+                            'Challans', 'Safety']
         st.markdown(create_detail_table(v_display, f"{fm_detail} Vehicle Performance"), unsafe_allow_html=True)
 
 def show_low_performance_drivers(engine):
