@@ -1906,8 +1906,14 @@ def main():
     # Store in session state for access
     st.session_state.all_drivers_cache = all_drivers_cache
 
-    # Low Performance Driver tab is hidden for now.
-    show_overall_performance(engine)
+    # Create tabs
+    tab1, tab2 = st.tabs(["📊 Overall Performance", "⚠️ Low Performance Driver"])
+
+    with tab1:
+        show_overall_performance(engine)
+
+    with tab2:
+        show_low_performance_drivers(engine)
 
 def show_low_performance_drivers(engine):
     """Show low performance drivers tab with all metrics from Overall Performance."""
