@@ -29,7 +29,7 @@ def swift_to_gps_vehicle(vehicle_no):
 load_dotenv()
 
 # ===== CACHE STORE CONFIGURATION =====
-CACHE_REFRESH_INTERVAL = 3600  # 1 hour in seconds
+CACHE_REFRESH_INTERVAL = 1800  # 30 minutes in seconds
 
 # Page configuration
 st.set_page_config(
@@ -463,7 +463,7 @@ def get_drivers_list_from_cache(cache_store):
     """Get all drivers list from cache store."""
     return cache_store['drivers_list']
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_all_drivers(_engine):
     # Only get drivers who have trip data in the last 4 months (including current month)
     query = """
@@ -487,7 +487,7 @@ def get_all_drivers(_engine):
         st.error(f"Error fetching drivers: {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_driver_info(_engine, driver_code):
     query = f"""
     SELECT code, name, guarantor, closing_balance, current_vehicle_number, app_date, unsettled_advance
@@ -506,7 +506,7 @@ def get_driver_info(_engine, driver_code):
     except Exception as e:
         return pd.DataFrame()
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_all_driver_data(_engine, driver_code, start_str, end_str):
     """Fetch all driver data in a single database connection for better performance."""
 
@@ -693,7 +693,7 @@ def get_all_driver_data(_engine, driver_code, start_str, end_str):
             'intangles_safety': pd.DataFrame()
         }
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_security_from_excel(driver_code):
     """Get security submitted from Excel file based on driver code."""
     try:
@@ -706,7 +706,7 @@ def get_security_from_excel(driver_code):
     except Exception as e:
         return 0
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_trip_data(_engine, driver_code, start_date, end_date):
     query = f"""
     SELECT * FROM swift_trip_log
@@ -727,7 +727,7 @@ def get_trip_data(_engine, driver_code, start_date, end_date):
     except Exception as e:
         return pd.DataFrame()
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_challan_data(_engine, driver_code, start_date, end_date):
     """Get challan data for a driver using driver_code from challan_data table."""
     query = f"""
@@ -749,7 +749,7 @@ def get_challan_data(_engine, driver_code, start_date, end_date):
     except Exception as e:
         return pd.DataFrame()
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_pod_damage_data(_engine, driver_code, start_date, end_date):
     """
     Get POD damage data from cn_data table.
@@ -783,7 +783,7 @@ def get_pod_damage_data(_engine, driver_code, start_date, end_date):
     except Exception as e:
         return pd.DataFrame()
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_repair_data(_engine, driver_code, start_date, end_date):
     query = f"""
     SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data
@@ -822,7 +822,7 @@ def convert_vehicle_no_to_gps_format(vehicle_no):
             return letter_part + num_part
     return v
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_gps_km_for_driver(_engine, driver_code, start_date, end_date):
     """Calculate GPS KM for a driver based on fvts_vehicles odometer data.
     Maps driver to vehicle using swift_trip_log periods.
@@ -908,7 +908,7 @@ def get_gps_km_for_driver(_engine, driver_code, start_date, end_date):
     except Exception as e:
         return {}
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_safety_data(_engine, driver_code, start_date, end_date):
     """
     Get safety data (Night Drives and Overspeeding) from day_wise_gps_km table.
@@ -958,7 +958,7 @@ def get_safety_data(_engine, driver_code, start_date, end_date):
     except Exception as e:
         return {'night_drives': {}, 'overspeeding': {}}
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_intangles_safety_data(_engine, driver_code, start_date, end_date):
     """
     Get safety data from intangles_alert_logs table.
@@ -1039,7 +1039,7 @@ def get_intangles_safety_data(_engine, driver_code, start_date, end_date):
     except Exception as e:
         return {'hard_brake': {}, 'freerun': {}, 'harsh_acc': {}, 'idling_time': {}, 'idling_fuel': {}}
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_gps_km_from_daily(_engine, driver_code, start_date, end_date):
     """Get GPS KM data from day_wise_gps_km table grouped by month."""
     query = f"""
@@ -1461,7 +1461,7 @@ def get_challan_details(challan_df, month=None):
     display_df.columns = ['Challan No', 'Date', 'Vehicle', 'Amount (₹)', 'Status'][:len(available_cols)]
     return display_df
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_safety_details(_engine, driver_code, start_date, end_date, safety_type='overspeed'):
     """Get detailed safety data (overspeeding or night drives) from day_wise_gps_km table."""
     column = 'overspeed' if safety_type == 'overspeed' else 'night_drive'
@@ -1508,7 +1508,7 @@ def format_safety_details(safety_df, month=None, months_list=None):
     display_df.columns = ['Date', 'Vehicle', 'Total KM', 'Count']
     return display_df
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_intangles_details(_engine, driver_code, start_date, end_date, alert_type):
     """Get detailed intangles alert data for a specific alert type."""
     if alert_type == 'idling':
@@ -1579,7 +1579,7 @@ def format_intangles_details(intangles_df, month=None, alert_type='hard_brake', 
 
     return display_df
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_active_vehicles_in_month(_engine, start_date, end_date, vehicle_list):
     """Get set of vehicles that had at least one trip in swift_trip_log during the given period."""
     vehicles_str = "','".join(vehicle_list)
@@ -1597,9 +1597,160 @@ def get_active_vehicles_in_month(_engine, start_date, end_date, vehicle_list):
         st.error(f"Error checking active vehicles: {e}")
         return set()
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
+    """Get performance data for ALL fleet vehicles in a single query.
+    Returns a DataFrame with per-vehicle rows. Called once for all fleet managers.
+    all_vehicles_tuple: tuple of all vehicle numbers (tuple for cache hashability).
+    """
+    all_vehicles = list(all_vehicles_tuple)
+    vehicles_str = "','".join(all_vehicles)
+    query = f"""
+    WITH vehicle_name_map AS (
+        SELECT vehicle_no AS swift_no, REPLACE(registration_no, ' ', '') AS gps_no
+        FROM swift_vehicles
+        WHERE vehicle_no IN ('{vehicles_str}')
+    ),
+    vehicle_trips AS (
+        SELECT
+            vehicle_no,
+            COUNT(CASE WHEN trip_status = 'Loaded' THEN 1 END) as loaded_trip_count,
+            SUM(CASE WHEN trip_status = 'Loaded' THEN car_qty ELSE 0 END) as total_qty,
+            SUM(CASE WHEN trip_status = 'Loaded' THEN freight ELSE 0 END) as total_revenue,
+            SUM(CASE WHEN trip_status = 'Loaded' THEN distance ELSE 0 END) as loaded_kms,
+            SUM(CASE WHEN trip_status = 'Empty' THEN distance ELSE 0 END) as empty_kms,
+            SUM(distance) as total_running_kms,
+            SUM(COALESCE(tl_cash_advance, 0) + COALESCE(tl_diesel_advance, 0) + COALESCE(e_toll, 0)) as total_advance
+        FROM swift_trip_log
+        WHERE vehicle_no IN ('{vehicles_str}')
+        AND loading_date >= '{start_date}'
+        AND loading_date <= '{end_date}'
+        GROUP BY vehicle_no
+    ),
+    vehicle_delays AS (
+        SELECT vehicle_no, COUNT(*) as delay_count,
+            COALESCE(SUM(car_qty), 0) as delay_car_lifted
+        FROM swift_trip_log
+        WHERE vehicle_no IN ('{vehicles_str}')
+        AND trip_status = 'Loaded'
+        AND loading_date >= '{start_date}' AND loading_date <= '{end_date}'
+        AND unloading_date IS NOT NULL
+        AND (
+            (distance <= 400 AND unloading_date > loading_date + INTERVAL '2 days') OR
+            (distance > 400 AND distance <= 800 AND unloading_date > loading_date + INTERVAL '3 days') OR
+            (distance > 800 AND distance <= 1400 AND unloading_date > loading_date + INTERVAL '4 days') OR
+            (distance > 1400 AND unloading_date > loading_date + INTERVAL '5 days')
+        )
+        GROUP BY vehicle_no
+    ),
+    vehicle_working_days AS (
+        SELECT vehicle_no, COUNT(DISTINCT loading_date) as working_days
+        FROM swift_trip_log
+        WHERE vehicle_no IN ('{vehicles_str}')
+        AND loading_date >= '{start_date}' AND loading_date <= '{end_date}'
+        GROUP BY vehicle_no
+    ),
+    vehicle_pod AS (
+        SELECT stl.vehicle_no, COALESCE(SUM(cn.qty), 0) as pod_damage_count
+        FROM cn_data cn
+        JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
+        WHERE stl.vehicle_no IN ('{vehicles_str}')
+        AND stl.loading_date >= '{start_date}' AND stl.loading_date <= '{end_date}'
+        AND (cn.pod_status ILIKE '%Delay%' OR cn.pod_status ILIKE '%NOT OK%' OR cn.pod_status ILIKE '%NOT OKAY%')
+        GROUP BY stl.vehicle_no
+    ),
+    vehicle_challans AS (
+        SELECT vm.swift_no as vehicle_no, COUNT(*) as challan_count, COALESCE(SUM(c.amount), 0) as challan_amount
+        FROM challan_data c
+        JOIN vehicle_name_map vm ON vm.gps_no = c.vehicle_no
+        WHERE c.challan_date >= '{start_date}' AND c.challan_date <= '{end_date}'
+        GROUP BY vm.swift_no
+    ),
+    vehicle_repairs AS (
+        SELECT vehicle_no, COALESCE(SUM(amount), 0) as repair_amount
+        FROM repair_data
+        WHERE vehicle_no IN ('{vehicles_str}')
+        AND COALESCE(voucher_date, doe) >= '{start_date}'
+        AND COALESCE(voucher_date, doe) <= '{end_date}'
+        GROUP BY vehicle_no
+    ),
+    vehicle_gps AS (
+        SELECT vm.swift_no as vehicle_no, SUM(g.total_km) as gps_kms,
+            SUM(CASE WHEN g.overspeed > 0 THEN 1 ELSE 0 END) as overspeed_days,
+            SUM(CASE WHEN g.night_drive > 0 THEN 1 ELSE 0 END) as night_drive_days
+        FROM day_wise_gps_km g
+        JOIN vehicle_name_map vm ON vm.gps_no = g.vehicle_no
+        WHERE g.date >= '{start_date}' AND g.date <= '{end_date}'
+        GROUP BY vm.swift_no
+    ),
+    vehicle_intangles AS (
+        SELECT vm.swift_no as vehicle_no,
+            COUNT(DISTINCT CASE WHEN i.alert_type = 'hard_brake' THEN DATE(i.event_time) END) as hard_brake_days,
+            COUNT(CASE WHEN i.alert_type = 'over_acc' THEN 1 END) as harsh_acc_count,
+            COUNT(DISTINCT CASE WHEN i.alert_type = 'freerun' THEN DATE(i.event_time) END) as freerun_days,
+            COALESCE(SUM(CASE WHEN i.alert_type = 'idling' THEN (i.end_time - i.start_time) / 60.0 ELSE 0 END), 0) as idling_time,
+            COALESCE(SUM(CASE WHEN i.alert_type = 'idling' THEN i.fuel_consumed ELSE 0 END), 0) as idling_fuel
+        FROM intangles_alert_logs i
+        JOIN vehicle_name_map vm ON vm.gps_no = i.vehicle_plate
+        WHERE i.event_time >= '{start_date}' AND i.event_time <= '{end_date}'
+        GROUP BY vm.swift_no
+    ),
+    without_driver AS (
+        SELECT DISTINCT current_vehicle_number
+        FROM swift_drivers
+        WHERE current_vehicle_number IN ('{vehicles_str}')
+        AND current_vehicle_number IS NOT NULL
+        AND current_vehicle_number != ''
+    )
+    SELECT
+        vt.vehicle_no,
+        vt.total_revenue, vt.total_qty, vt.loaded_trip_count,
+        vt.loaded_kms, vt.empty_kms, vt.total_running_kms, vt.total_advance,
+        COALESCE(vg.gps_kms, 0) as gps_kms,
+        COALESCE(vd.delay_count, 0) as delay_count,
+        COALESCE(vd.delay_car_lifted, 0) as delay_car_lifted,
+        COALESCE(vwd.working_days, 0) as working_days,
+        COALESCE(vp.pod_damage_count, 0) as pod_damage_count,
+        COALESCE(vr.repair_amount, 0) as repair_amount,
+        (vt.total_revenue - vt.total_advance - COALESCE(vr.repair_amount, 0)) as contribution,
+        COALESCE(vc.challan_count, 0) as challan_count,
+        COALESCE(vc.challan_amount, 0) as challan_amount,
+        COALESCE(vg.overspeed_days, 0) as overspeed_days,
+        COALESCE(vg.night_drive_days, 0) as night_drive_days,
+        COALESCE(vi.hard_brake_days, 0) as hard_brake_days,
+        COALESCE(vi.harsh_acc_count, 0) as harsh_acc_count,
+        COALESCE(vi.freerun_days, 0) as freerun_days,
+        COALESCE(vi.idling_time, 0) as idling_time,
+        COALESCE(vi.idling_fuel, 0) as idling_fuel,
+        CASE WHEN wd.current_vehicle_number IS NOT NULL THEN 1 ELSE 0 END as has_driver
+    FROM vehicle_trips vt
+    LEFT JOIN vehicle_delays vd ON vt.vehicle_no = vd.vehicle_no
+    LEFT JOIN vehicle_pod vp ON vt.vehicle_no = vp.vehicle_no
+    LEFT JOIN vehicle_challans vc ON vt.vehicle_no = vc.vehicle_no
+    LEFT JOIN vehicle_repairs vr ON vt.vehicle_no = vr.vehicle_no
+    LEFT JOIN vehicle_gps vg ON vt.vehicle_no = vg.vehicle_no
+    LEFT JOIN vehicle_intangles vi ON vt.vehicle_no = vi.vehicle_no
+    LEFT JOIN vehicle_working_days vwd ON vt.vehicle_no = vwd.vehicle_no
+    LEFT JOIN without_driver wd ON vt.vehicle_no = wd.current_vehicle_number
+    WHERE vt.loaded_trip_count > 0
+    ORDER BY vt.vehicle_no
+    """
+    try:
+        with _engine.connect() as conn:
+            result = conn.execute(text(query))
+            rows = result.fetchall()
+            if rows:
+                return pd.DataFrame(rows, columns=result.keys())
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error loading fleet vehicle performance: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
-    """Get performance data aggregated per vehicle for a fleet manager's vehicles."""
+    """Get performance data for a specific fleet manager's vehicles (uses bulk cache)."""
+    # This is a wrapper - the actual data comes from get_all_fleet_data via session state
+    # Kept for backward compatibility with vehicle-wise breakdown
     vehicles_str = "','".join(vehicle_list)
     query = f"""
     WITH vehicle_name_map AS (
@@ -1733,7 +1884,7 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
         st.error(f"Error loading fleet vehicle performance: {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_pending_pod_fleet(_engine, fleet_manager_vehicles):
     """Get pending POD data grouped by fleet manager with month-wise breakdown by cn_date.
     Pending POD: bill_no is blank, pod_receipt_no is blank, eta < today - 4 days.
@@ -1804,7 +1955,7 @@ def get_pending_pod_fleet(_engine, fleet_manager_vehicles):
         st.error(f"Error loading pending POD data: {e}")
         return pd.DataFrame(), pd.DataFrame()
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_vehicles_without_driver(_engine, vehicle_list):
     """Check which vehicles have no driver assigned in swift_drivers (current_vehicle_number)."""
     vehicles_str = "','".join(vehicle_list)
@@ -1824,21 +1975,36 @@ def get_vehicles_without_driver(_engine, vehicle_list):
         st.error(f"Error checking driver assignments: {e}")
         return []
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_fleet_manager_performance(_engine, start_date, end_date, fleet_manager_vehicles):
-    """Get aggregated performance per fleet manager by querying vehicle-level data."""
+    """Get aggregated performance per fleet manager using a single bulk query."""
+    # Build vehicle-to-FM mapping
+    vehicle_to_fm = {}
+    for fm_name, vehicles in fleet_manager_vehicles.items():
+        for v in vehicles:
+            vehicle_to_fm[v] = fm_name
+
+    # Single bulk query for ALL vehicles
+    all_vehicles = tuple(vehicle_to_fm.keys())
+    all_df = get_all_fleet_data(_engine, start_date, end_date, all_vehicles)
+
     results = []
     for fm_name, vehicles in fleet_manager_vehicles.items():
-        vdf = get_fleet_vehicle_performance(_engine, start_date, end_date, vehicles)
-        vehicles_without_driver = get_vehicles_without_driver(_engine, vehicles)
+        vehicles_set = set(vehicles)
+        if all_df.empty:
+            vdf = pd.DataFrame()
+        else:
+            vdf = all_df[all_df['vehicle_no'].isin(vehicles_set)]
+
         if vdf.empty:
+            without_driver_count = len(vehicles)
             row = {
                 'fleet_manager': fm_name, 'active_vehicles': 0,
                 'loaded_trip_count': 0, 'total_revenue': 0, 'total_qty': 0,
                 'loaded_kms': 0, 'empty_kms': 0, 'total_running_kms': 0,
                 'total_advance': 0, 'gps_kms': 0, 'delay_count': 0,
                 'delay_car_lifted': 0, 'working_days': 0,
-                'without_driver': len(vehicles_without_driver),
+                'without_driver': without_driver_count,
                 'pod_damage_count': 0, 'repair_amount': 0, 'contribution': 0,
                 'contribution_pct': 0, 'challan_count': 0, 'challan_amount': 0,
                 'overspeed_days': 0, 'night_drive_days': 0, 'hard_brake_days': 0,
@@ -1846,6 +2012,10 @@ def get_fleet_manager_performance(_engine, start_date, end_date, fleet_manager_v
                 'idling_time': 0, 'idling_fuel': 0,
             }
         else:
+            # Count vehicles without driver from bulk data
+            assigned_vehicles = set(vdf[vdf['has_driver'] == 1]['vehicle_no'])
+            without_driver_count = len([v for v in vehicles if v not in assigned_vehicles])
+
             total_revenue = vdf['total_revenue'].sum()
             total_advance = vdf['total_advance'].sum()
             repair_amount = vdf['repair_amount'].sum()
@@ -1864,7 +2034,7 @@ def get_fleet_manager_performance(_engine, start_date, end_date, fleet_manager_v
                 'delay_count': vdf['delay_count'].sum(),
                 'delay_car_lifted': vdf['delay_car_lifted'].sum(),
                 'working_days': vdf['working_days'].sum(),
-                'without_driver': len(vehicles_without_driver),
+                'without_driver': without_driver_count,
                 'pod_damage_count': vdf['pod_damage_count'].sum(),
                 'repair_amount': repair_amount,
                 'contribution': contribution,
@@ -1887,7 +2057,7 @@ def get_fleet_manager_performance(_engine, start_date, end_date, fleet_manager_v
         results.append(row)
     return pd.DataFrame(results)
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_low_performance_drivers(_engine, start_date, end_date):
     """
     Get all drivers with comprehensive performance metrics matching Overall Performance tab.
@@ -2043,7 +2213,7 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         st.error(f"Error loading low performance data: {e}")
         return pd.DataFrame()
 
-@st.cache_resource(ttl=3600, show_spinner=False)
+@st.cache_resource(ttl=1800, show_spinner=False)
 def preload_all_drivers_cache(_engine):
     """Pre-load ALL drivers data at startup using BULK queries. Much faster than per-driver queries."""
     start_str = "2025-09-01"
@@ -2426,7 +2596,9 @@ def show_fleet_manager(engine):
     # --- Section 2: Fleet Manager Performance ---
     st.markdown("#### 📊 Fleet Manager Performance")
 
-    # Get all performance data for selected month
+    # Get all performance data for selected month (single bulk query for ALL vehicles)
+    all_vehicles_tuple = tuple(v for vlist in FLEET_MANAGER_VEHICLES.values() for v in vlist)
+    all_fleet_df = get_all_fleet_data(engine, start_date, end_date, all_vehicles_tuple)
     perf_df = get_fleet_manager_performance(engine, start_date, end_date, FLEET_MANAGER_VEHICLES)
 
     if perf_df.empty:
@@ -2680,7 +2852,11 @@ def show_fleet_manager(engine):
         key="fm_detail_select"
     )
 
-    vehicle_perf_df = get_fleet_vehicle_performance(engine, start_date, end_date, FLEET_MANAGER_VEHICLES[fm_detail])
+    # Use bulk data (already cached) - filter for selected fleet manager
+    if not all_fleet_df.empty:
+        vehicle_perf_df = all_fleet_df[all_fleet_df['vehicle_no'].isin(set(FLEET_MANAGER_VEHICLES[fm_detail]))].copy()
+    else:
+        vehicle_perf_df = pd.DataFrame()
 
     if vehicle_perf_df.empty:
         st.info(f"No trip data found for {fm_detail}'s vehicles in the selected period.")
