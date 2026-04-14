@@ -1907,13 +1907,21 @@ def main():
     st.session_state.all_drivers_cache = all_drivers_cache
 
     # Create tabs
-    tab1, tab2 = st.tabs(["📊 Overall Performance", "⚠️ Low Performance Driver"])
+    tab1, tab2, tab3 = st.tabs(["📊 Overall Performance", "⚠️ Low Performance Driver", "🚛 Fleet Manager"])
 
     with tab1:
         show_overall_performance(engine)
 
     with tab2:
         show_low_performance_drivers(engine)
+
+    with tab3:
+        show_fleet_manager(engine)
+
+def show_fleet_manager(engine):
+    """Show Fleet Manager tab."""
+    st.markdown("### 🚛 Fleet Manager")
+    st.markdown("*Fleet management overview and controls*")
 
 def show_low_performance_drivers(engine):
     """Show low performance drivers tab with all metrics from Overall Performance."""
