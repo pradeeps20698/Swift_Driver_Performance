@@ -10,6 +10,20 @@ from datetime import datetime, timedelta
 import calendar
 import threading
 import time
+import re
+
+def swift_to_gps_vehicle(vehicle_no):
+    """Convert swift_trip_log vehicle_no format to GPS/intangles format.
+    e.g. '0020 NL01AJ' -> 'NL01AJ0020', 'HR55AM 1370' -> 'HR55AM1370'
+    """
+    v = re.sub(r'[^A-Z0-9]', '', vehicle_no.upper())
+    match = re.search(r'([A-Z]{2}\d{2}[A-Z]{1,2})', v)
+    if not match:
+        return v
+    state_code = match.group(1)
+    remaining = v[:match.start()] + v[match.end():]
+    number = re.sub(r'[^0-9]', '', remaining)
+    return state_code + number
 
 # Load environment variables
 load_dotenv()
@@ -1566,6 +1580,314 @@ def format_intangles_details(intangles_df, month=None, alert_type='hard_brake', 
     return display_df
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def get_active_vehicles_in_month(_engine, start_date, end_date, vehicle_list):
+    """Get set of vehicles that had at least one trip in swift_trip_log during the given period."""
+    vehicles_str = "','".join(vehicle_list)
+    query = f"""
+    SELECT DISTINCT vehicle_no
+    FROM swift_trip_log
+    WHERE vehicle_no IN ('{vehicles_str}')
+    AND loading_date >= '{start_date}' AND loading_date <= '{end_date}'
+    """
+    try:
+        with _engine.connect() as conn:
+            result = conn.execute(text(query))
+            return set(r[0] for r in result.fetchall())
+    except Exception as e:
+        st.error(f"Error checking active vehicles: {e}")
+        return set()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
+    """Get performance data aggregated per vehicle for a fleet manager's vehicles."""
+    vehicles_str = "','".join(vehicle_list)
+    query = f"""
+    WITH vehicle_name_map AS (
+        SELECT vehicle_no AS swift_no, REPLACE(registration_no, ' ', '') AS gps_no
+        FROM swift_vehicles
+        WHERE vehicle_no IN ('{vehicles_str}')
+    ),
+    vehicle_trips AS (
+        SELECT
+            vehicle_no,
+            COUNT(CASE WHEN trip_status = 'Loaded' THEN 1 END) as loaded_trip_count,
+            SUM(CASE WHEN trip_status = 'Loaded' THEN car_qty ELSE 0 END) as total_qty,
+            SUM(CASE WHEN trip_status = 'Loaded' THEN freight ELSE 0 END) as total_revenue,
+            SUM(CASE WHEN trip_status = 'Loaded' THEN distance ELSE 0 END) as loaded_kms,
+            SUM(CASE WHEN trip_status = 'Empty' THEN distance ELSE 0 END) as empty_kms,
+            SUM(distance) as total_running_kms,
+            SUM(COALESCE(tl_cash_advance, 0) + COALESCE(tl_diesel_advance, 0) + COALESCE(e_toll, 0)) as total_advance
+        FROM swift_trip_log
+        WHERE vehicle_no IN ('{vehicles_str}')
+        AND loading_date >= '{start_date}'
+        AND loading_date <= '{end_date}'
+        GROUP BY vehicle_no
+    ),
+    vehicle_delays AS (
+        SELECT vehicle_no, COUNT(*) as delay_count,
+            COALESCE(SUM(car_qty), 0) as delay_car_lifted
+        FROM swift_trip_log
+        WHERE vehicle_no IN ('{vehicles_str}')
+        AND trip_status = 'Loaded'
+        AND loading_date >= '{start_date}' AND loading_date <= '{end_date}'
+        AND unloading_date IS NOT NULL
+        AND (
+            (distance <= 400 AND unloading_date > loading_date + INTERVAL '2 days') OR
+            (distance > 400 AND distance <= 800 AND unloading_date > loading_date + INTERVAL '3 days') OR
+            (distance > 800 AND distance <= 1400 AND unloading_date > loading_date + INTERVAL '4 days') OR
+            (distance > 1400 AND unloading_date > loading_date + INTERVAL '5 days')
+        )
+        GROUP BY vehicle_no
+    ),
+    vehicle_working_days AS (
+        SELECT vehicle_no, COUNT(DISTINCT loading_date) as working_days
+        FROM swift_trip_log
+        WHERE vehicle_no IN ('{vehicles_str}')
+        AND loading_date >= '{start_date}' AND loading_date <= '{end_date}'
+        GROUP BY vehicle_no
+    ),
+    vehicle_pod AS (
+        SELECT stl.vehicle_no, COALESCE(SUM(cn.qty), 0) as pod_damage_count
+        FROM cn_data cn
+        JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
+        WHERE stl.vehicle_no IN ('{vehicles_str}')
+        AND stl.loading_date >= '{start_date}' AND stl.loading_date <= '{end_date}'
+        AND (cn.pod_status ILIKE '%Delay%' OR cn.pod_status ILIKE '%NOT OK%' OR cn.pod_status ILIKE '%NOT OKAY%')
+        GROUP BY stl.vehicle_no
+    ),
+    vehicle_challans AS (
+        SELECT vm.swift_no as vehicle_no, COUNT(*) as challan_count, COALESCE(SUM(c.amount), 0) as challan_amount
+        FROM challan_data c
+        JOIN vehicle_name_map vm ON vm.gps_no = c.vehicle_no
+        WHERE c.challan_date >= '{start_date}' AND c.challan_date <= '{end_date}'
+        GROUP BY vm.swift_no
+    ),
+    vehicle_repairs AS (
+        SELECT vehicle_no, COALESCE(SUM(amount), 0) as repair_amount
+        FROM repair_data
+        WHERE vehicle_no IN ('{vehicles_str}')
+        AND COALESCE(voucher_date, doe) >= '{start_date}'
+        AND COALESCE(voucher_date, doe) <= '{end_date}'
+        GROUP BY vehicle_no
+    ),
+    vehicle_gps AS (
+        SELECT vm.swift_no as vehicle_no, SUM(g.total_km) as gps_kms,
+            SUM(CASE WHEN g.overspeed > 0 THEN 1 ELSE 0 END) as overspeed_days,
+            SUM(CASE WHEN g.night_drive > 0 THEN 1 ELSE 0 END) as night_drive_days
+        FROM day_wise_gps_km g
+        JOIN vehicle_name_map vm ON vm.gps_no = g.vehicle_no
+        WHERE g.date >= '{start_date}' AND g.date <= '{end_date}'
+        GROUP BY vm.swift_no
+    ),
+    vehicle_intangles AS (
+        SELECT vm.swift_no as vehicle_no,
+            COUNT(DISTINCT CASE WHEN i.alert_type = 'hard_brake' THEN DATE(i.event_time) END) as hard_brake_days,
+            COUNT(CASE WHEN i.alert_type = 'over_acc' THEN 1 END) as harsh_acc_count,
+            COUNT(DISTINCT CASE WHEN i.alert_type = 'freerun' THEN DATE(i.event_time) END) as freerun_days,
+            COALESCE(SUM(CASE WHEN i.alert_type = 'idling' THEN (i.end_time - i.start_time) / 60.0 ELSE 0 END), 0) as idling_time,
+            COALESCE(SUM(CASE WHEN i.alert_type = 'idling' THEN i.fuel_consumed ELSE 0 END), 0) as idling_fuel
+        FROM intangles_alert_logs i
+        JOIN vehicle_name_map vm ON vm.gps_no = i.vehicle_plate
+        WHERE i.event_time >= '{start_date}' AND i.event_time <= '{end_date}'
+        GROUP BY vm.swift_no
+    )
+    SELECT
+        vt.vehicle_no,
+        vt.total_revenue, vt.total_qty, vt.loaded_trip_count,
+        vt.loaded_kms, vt.empty_kms, vt.total_running_kms, vt.total_advance,
+        COALESCE(vg.gps_kms, 0) as gps_kms,
+        COALESCE(vd.delay_count, 0) as delay_count,
+        COALESCE(vd.delay_car_lifted, 0) as delay_car_lifted,
+        COALESCE(vwd.working_days, 0) as working_days,
+        COALESCE(vp.pod_damage_count, 0) as pod_damage_count,
+        COALESCE(vr.repair_amount, 0) as repair_amount,
+        (vt.total_revenue - vt.total_advance - COALESCE(vr.repair_amount, 0)) as contribution,
+        COALESCE(vc.challan_count, 0) as challan_count,
+        COALESCE(vc.challan_amount, 0) as challan_amount,
+        COALESCE(vg.overspeed_days, 0) as overspeed_days,
+        COALESCE(vg.night_drive_days, 0) as night_drive_days,
+        COALESCE(vi.hard_brake_days, 0) as hard_brake_days,
+        COALESCE(vi.harsh_acc_count, 0) as harsh_acc_count,
+        COALESCE(vi.freerun_days, 0) as freerun_days,
+        COALESCE(vi.idling_time, 0) as idling_time,
+        COALESCE(vi.idling_fuel, 0) as idling_fuel
+    FROM vehicle_trips vt
+    LEFT JOIN vehicle_delays vd ON vt.vehicle_no = vd.vehicle_no
+    LEFT JOIN vehicle_pod vp ON vt.vehicle_no = vp.vehicle_no
+    LEFT JOIN vehicle_challans vc ON vt.vehicle_no = vc.vehicle_no
+    LEFT JOIN vehicle_repairs vr ON vt.vehicle_no = vr.vehicle_no
+    LEFT JOIN vehicle_gps vg ON vt.vehicle_no = vg.vehicle_no
+    LEFT JOIN vehicle_intangles vi ON vt.vehicle_no = vi.vehicle_no
+    LEFT JOIN vehicle_working_days vwd ON vt.vehicle_no = vwd.vehicle_no
+    WHERE vt.loaded_trip_count > 0
+    ORDER BY vt.vehicle_no
+    """
+    try:
+        with _engine.connect() as conn:
+            result = conn.execute(text(query))
+            rows = result.fetchall()
+            if rows:
+                return pd.DataFrame(rows, columns=result.keys())
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Error loading fleet vehicle performance: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_pending_pod_fleet(_engine, fleet_manager_vehicles):
+    """Get pending POD data grouped by fleet manager with month-wise breakdown by cn_date.
+    Pending POD: bill_no is blank, pod_receipt_no is blank, eta < today - 4 days.
+    """
+    all_vehicles = [v for vlist in fleet_manager_vehicles.values() for v in vlist]
+    vehicles_str = "','".join(all_vehicles)
+    d_minus_4 = (datetime.now() - timedelta(days=4)).strftime('%Y-%m-%d')
+    query = f"""
+    SELECT cn.cn_no, cn.cn_date, cn.branch, cn.billing_party, cn.origin,
+           cn.consignee, cn.destination, cn.vehicle_no, cn.qty, cn.basic_freight
+    FROM cn_data cn
+    WHERE cn.vehicle_no IN ('{vehicles_str}')
+    AND (cn.bill_no IS NULL OR TRIM(cn.bill_no) = '')
+    AND (cn.pod_receipt_no IS NULL OR TRIM(cn.pod_receipt_no) = '')
+    AND cn.eta IS NOT NULL
+    AND cn.eta::date < '{d_minus_4}'::date
+    AND (cn.is_active = true OR cn.is_active::text = 'Yes')
+    """
+    try:
+        vehicle_to_fm = {}
+        for fm, vehicles in fleet_manager_vehicles.items():
+            for v in vehicles:
+                vehicle_to_fm[v] = fm
+        with _engine.connect() as conn:
+            result = conn.execute(text(query))
+            rows = result.fetchall()
+            if not rows:
+                return pd.DataFrame(), pd.DataFrame()
+            df = pd.DataFrame(rows, columns=result.keys())
+            df['fleet_manager'] = df['vehicle_no'].map(vehicle_to_fm)
+            df['cn_date'] = pd.to_datetime(df['cn_date'], errors='coerce')
+            df['month'] = df['cn_date'].dt.strftime("%b'%y")
+            df['month_sort'] = df['cn_date'].dt.to_period('M')
+
+            # Get sorted unique months (newest first)
+            months_sorted = sorted(df['month_sort'].dropna().unique(), reverse=True)
+            month_labels = [m.strftime("%b'%y") for m in months_sorted]
+
+            # Build result table
+            fm_list = sorted(df['fleet_manager'].dropna().unique())
+            result_rows = []
+            for fm in fm_list:
+                fm_df = df[df['fleet_manager'] == fm]
+                row = {'Fleet Manager': fm}
+                for ml in month_labels:
+                    mdf = fm_df[fm_df['month'] == ml]
+                    row[f"{ml} Qty"] = int(mdf['qty'].sum()) if not mdf.empty else 0
+                    row[f"{ml} CN"] = len(mdf) if not mdf.empty else 0
+                result_rows.append(row)
+
+            # Grand total row
+            grand = {'Fleet Manager': 'GRAND TOTAL'}
+            for ml in month_labels:
+                mdf = df[df['month'] == ml]
+                grand[f"{ml} Qty"] = int(mdf['qty'].sum()) if not mdf.empty else 0
+                grand[f"{ml} CN"] = len(mdf) if not mdf.empty else 0
+            result_rows.append(grand)
+
+            # Build detail dataframe for download
+            detail_df = df[['cn_no', 'cn_date', 'branch', 'billing_party', 'origin',
+                           'consignee', 'destination', 'vehicle_no', 'qty', 'basic_freight', 'fleet_manager']].copy()
+            detail_df.columns = ['CN No', 'CN Date', 'Branch', 'Billing Party', 'Origin',
+                                'Consignee', 'Destination', 'Vehicle No', 'Qty', 'Basic Freight', 'Fleet Manager']
+            detail_df = detail_df.sort_values(['Fleet Manager', 'CN Date'], ascending=[True, False])
+
+            return pd.DataFrame(result_rows), detail_df
+    except Exception as e:
+        st.error(f"Error loading pending POD data: {e}")
+        return pd.DataFrame(), pd.DataFrame()
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_vehicles_without_driver(_engine, vehicle_list):
+    """Check which vehicles have no driver assigned in swift_drivers (current_vehicle_number)."""
+    vehicles_str = "','".join(vehicle_list)
+    query = f"""
+    SELECT DISTINCT current_vehicle_number
+    FROM swift_drivers
+    WHERE current_vehicle_number IN ('{vehicles_str}')
+    AND current_vehicle_number IS NOT NULL
+    AND current_vehicle_number != ''
+    """
+    try:
+        with _engine.connect() as conn:
+            result = conn.execute(text(query))
+            assigned = {row[0] for row in result.fetchall()}
+        return [v for v in vehicle_list if v not in assigned]
+    except Exception as e:
+        st.error(f"Error checking driver assignments: {e}")
+        return []
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_fleet_manager_performance(_engine, start_date, end_date, fleet_manager_vehicles):
+    """Get aggregated performance per fleet manager by querying vehicle-level data."""
+    results = []
+    for fm_name, vehicles in fleet_manager_vehicles.items():
+        vdf = get_fleet_vehicle_performance(_engine, start_date, end_date, vehicles)
+        vehicles_without_driver = get_vehicles_without_driver(_engine, vehicles)
+        if vdf.empty:
+            row = {
+                'fleet_manager': fm_name, 'active_vehicles': 0,
+                'loaded_trip_count': 0, 'total_revenue': 0, 'total_qty': 0,
+                'loaded_kms': 0, 'empty_kms': 0, 'total_running_kms': 0,
+                'total_advance': 0, 'gps_kms': 0, 'delay_count': 0,
+                'delay_car_lifted': 0, 'working_days': 0,
+                'without_driver': len(vehicles_without_driver),
+                'pod_damage_count': 0, 'repair_amount': 0, 'contribution': 0,
+                'contribution_pct': 0, 'challan_count': 0, 'challan_amount': 0,
+                'overspeed_days': 0, 'night_drive_days': 0, 'hard_brake_days': 0,
+                'harsh_acc_count': 0, 'freerun_days': 0, 'total_safety_violations': 0,
+                'idling_time': 0, 'idling_fuel': 0,
+            }
+        else:
+            total_revenue = vdf['total_revenue'].sum()
+            total_advance = vdf['total_advance'].sum()
+            repair_amount = vdf['repair_amount'].sum()
+            contribution = total_revenue - total_advance - repair_amount
+            row = {
+                'fleet_manager': fm_name,
+                'active_vehicles': len(vdf),
+                'loaded_trip_count': vdf['loaded_trip_count'].sum(),
+                'total_revenue': total_revenue,
+                'total_qty': vdf['total_qty'].sum(),
+                'loaded_kms': vdf['loaded_kms'].sum(),
+                'empty_kms': vdf['empty_kms'].sum(),
+                'total_running_kms': vdf['total_running_kms'].sum(),
+                'total_advance': total_advance,
+                'gps_kms': vdf['gps_kms'].sum(),
+                'delay_count': vdf['delay_count'].sum(),
+                'delay_car_lifted': vdf['delay_car_lifted'].sum(),
+                'working_days': vdf['working_days'].sum(),
+                'without_driver': len(vehicles_without_driver),
+                'pod_damage_count': vdf['pod_damage_count'].sum(),
+                'repair_amount': repair_amount,
+                'contribution': contribution,
+                'contribution_pct': (contribution / total_revenue * 100) if total_revenue > 0 else 0,
+                'challan_count': vdf['challan_count'].sum(),
+                'challan_amount': vdf['challan_amount'].sum(),
+                'overspeed_days': vdf['overspeed_days'].sum(),
+                'night_drive_days': vdf['night_drive_days'].sum(),
+                'hard_brake_days': vdf['hard_brake_days'].sum(),
+                'harsh_acc_count': vdf['harsh_acc_count'].sum(),
+                'freerun_days': vdf['freerun_days'].sum(),
+                'total_safety_violations': (
+                    vdf['overspeed_days'].sum() + vdf['night_drive_days'].sum() +
+                    vdf['hard_brake_days'].sum() + vdf['harsh_acc_count'].sum() +
+                    vdf['freerun_days'].sum()
+                ),
+                'idling_time': vdf['idling_time'].sum(),
+                'idling_fuel': vdf['idling_fuel'].sum(),
+            }
+        results.append(row)
+    return pd.DataFrame(results)
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_low_performance_drivers(_engine, start_date, end_date):
     """
     Get all drivers with comprehensive performance metrics matching Overall Performance tab.
@@ -1919,9 +2241,476 @@ def main():
         show_fleet_manager(engine)
 
 def show_fleet_manager(engine):
-    """Show Fleet Manager tab."""
-    st.markdown("### 🚛 Fleet Manager")
-    st.markdown("*Fleet management overview and controls*")
+    """Show Fleet Manager tab with vehicle assignments and aggregated performance."""
+    st.markdown("### 🚛 Fleet Manager Performance")
+    st.markdown("*Fleet manager performance based on vehicles assigned*")
+
+    # Fleet Manager -> Vehicle mapping
+    FLEET_MANAGER_VEHICLES = {
+        "VISHAL": [
+            "0020 NL01AJ","0167 NL01AH","0219 NL01AH","0283 NL01AH",
+            "0523 GJ08AU","0536 GJ08AU","0570 GJ08AU","0572 GJ08AU",
+            "0639 GJ08AU","0699 GJ08AU","1797 PB11BR",
+            "2081NL01AJ","2082NL01AJ","2083NL01AJ","2084NL01AJ","2209NL01AJ",
+            "2623 NL01AG","2625 NL01AG","3137 NL01AG",
+            "4061 NL01N","4062 NL01N","4064 NL01N","4066 NL01N","4067 NL01N",
+            "4079 NL01AG",
+            "4385 NL01AJ","4387 NL01AJ","4389 NL01AJ",
+            "4521 NL01AH","4522 NL01AH","4523 NL01AH","4524 NL01AH",
+            "4525 NL01AH","4526 NL01AH","4527 NL01AH","4528 NL01AH",
+            "4529 NL01AH","4530 NL01AH",
+            "7178NL01AJ","7225 NL01AF",
+            "8314 NL01AG","9392 NL01AH","9450 NL01L","9455 NL01L",
+            "9457 NL01L","9458 NL01L","9566 NL01AH",
+            "9889 NL01AF","9890 NL01AF","9891 NL01AF","9991 NL01AG",
+            "HR55AM 1370",
+        ],
+        "GOPI": [
+            "0218 NL01AH","0628 GJ08AU","0740 GJ08AU","0863 GJ08AU",
+            "0908 GJ08AU","0951 GJ08AU","0983 GJ08AU","0986 GJ08AU",
+            "1107 NL01AH","1108 NL01AH","1109 NL01AH","1110 NL01AH",
+            "1111 NL01AH","1112 NL01AH","1113 NL01AH","1114 NL01AH","1115 NL01AH",
+            "2210NL01AJ","2211NL01AJ",
+            "2396 NL01N","2397 NL01N","2398 NL01N","2399 NL01N","2400 NL01N",
+            "3431 NL01AG","3432 NL01AG","3433 NL01AG",
+            "3748 HR55AR",
+            "3906 NL01N","3907 NL01N","3908 NL01N","3909 NL01N","3910 NL01N",
+            "4065 NL01N","4068 NL01N","4069 NL01N",
+            "4388 NL01AJ","4390 NL01AJ",
+            "4531 HR55AR","4531 NL01AH","4532 NL01AH","4533 NL01AH",
+            "4534 NL01AH","4535 NL01AH","4536 NL01AH","4537 NL01AH",
+            "4538 NL01AH","4539 NL01AH",
+            "5825NL01AJ","5826NL01AJ","5827NL01AJ","5828NL01AJ",
+            "6158 HR55AQ","6429 HR55AQ",
+            "6456NL01AJ","6457NL01AJ","6458NL01AJ","6459NL01AJ","6460NL01AJ",
+            "6469 HR55AQ","6484HR55AQ",
+            "7175NL01AJ","7176 NL01AJ","7177NL01AJ",
+            "7220 NL01AF","7222 NL01AF","7223 NL01AF","7224 NL01AF","7226 NL01AF",
+            "8204 NL01AH","8224 HR55AQ","8315 NL01AG",
+            "8450 HR55AQ","8593 HR55AR","8597 HR55AR",
+            "8739 HR55AQ","8752 HR55AR","8795 HR55AR",
+            "9452 NL01L","9460 NL01L","9494 HR55AQ",
+        ],
+        "JAGDISH": [
+            "0284 NL01AH","0285 NL01AH","0286 NL01AH",
+            "0722 GJ08AU","0739 GJ08AU","0764 GJ08AU",
+            "0814 GJ08AU","0815 GJ08AU","0816 GJ08AU","0824 GJ08AU",
+            "2624 NL01AG","3136 NL01AG",
+            "4063 NL01N",
+            "8630 NL01AG","9451NL01L",
+            "NL01Q 8157","HR55AP 1974",
+            "HR55AM 2340","HR55AM 9667","HR55AM 0907","HR55AM 8703",
+            "HR55AN 5406","HR55AN 5307",
+            "HR55AM 4278","HR55AM 6059",
+            "NL01Q8150","NL01Q9547",
+        ],
+        "PRAVEEN": [
+            "0959 HR55AQ","1171 HR55AR","1564 HR55AQ","1652 NL01AH","1741 HR55AR",
+            "2206NL01AJ","2207NL01AJ","2208NL01AJ",
+            "2829 HR55AR","2885 HR55AQ","2942 HR55AQ",
+            "3135 NL01AG",
+            "4078 NL01AG","4080 NL01AG","4149 HR55AQ","4180 HR55AQ","4274 HR55AR",
+            "4540 NL01AH",
+            "4849 NL01AH","4850 NL01AH","4851 NL01AH","4852 NL01AH",
+            "4853 NL01AH","4854 NL01AH","4855 NL01AH","4856 NL01AH",
+            "4857 NL01AH","4858 NL01AH",
+            "5077 HR55AQ",
+            "5305 NL01N","5306 NL01N","5307 NL01N","5309 NL01N",
+            "5417 HR55AQ","5495 HR55AR","5578 HR55AR","5709 HR55AR",
+            "5819NL01AJ","5820NL01AJ","5821NL01AJ","5822NL01AJ",
+            "5823NL01AJ","5824 HR55AQ","5824NL01AJ",
+            "6017 HR55AR",
+            "7169NL01AJ","7170NL01AJ","7171NL01AJ","7172NL01AJ",
+            "7173NL01AJ","7174NL01AJ",
+            "7219 NL01AF","7221 NL01AF",
+            "7521 NL01N","7522 NL01N","7523 NL01N","7524 NL01N","7525 NL01N",
+            "7526 NL01N","7527 NL01N","7528 NL01N","7529 NL01N","7530 NL01N",
+            "7553 HR55AR","7745 HR55AR","8008 HR55AR","8078 HR55AR",
+            "8193 NL01AH",
+            "9080 HR55AQ","9104 HR55AR","9244 HR55AQ","9256 HR55AQ",
+            "9453 NL01L","9454 NL01L","9456 NL01L",
+            "9702 HR55AR","9851 NL01AH",
+        ],
+    }
+
+    # --- Month Filter ---
+    current_date = datetime.now()
+    # Build month options: last 6 months
+    month_options = []
+    for i in range(6):
+        year = current_date.year
+        month = current_date.month - i
+        if month <= 0:
+            month += 12
+            year -= 1
+        month_options.append(f"{year}-{month:02d}")
+
+    col_month, col_period, _ = st.columns([1, 2, 3])
+    with col_month:
+        selected_month = st.selectbox(
+            "📅 Select Month",
+            month_options,
+            index=0,
+            format_func=lambda m: datetime.strptime(m, "%Y-%m").strftime("%B %Y"),
+            key="fm_month_select"
+        )
+
+    # Calculate start/end date from selected month
+    sel_year, sel_mon = map(int, selected_month.split("-"))
+    start_date = datetime(sel_year, sel_mon, 1)
+    last_day = calendar.monthrange(sel_year, sel_mon)[1]
+    end_date = datetime(sel_year, sel_mon, last_day)
+
+    with col_period:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(f"**Data Period:** {start_date.strftime('%d-%b-%Y')} to {end_date.strftime('%d-%b-%Y')}")
+
+    # --- Fleet Manager Vehicle Summary ---
+    st.markdown("#### 📋 Fleet Manager Vehicle Assignments")
+    vehicle_rows = []
+    for fm, vehicles in FLEET_MANAGER_VEHICLES.items():
+        for v in vehicles:
+            vehicle_rows.append({"Fleet Manager": fm, "Vehicle No": v})
+    vehicle_list_df = pd.DataFrame(vehicle_rows)
+
+    # Get active vehicles from swift_trip_log for selected month
+    all_assigned_vehicles = [v for vlist in FLEET_MANAGER_VEHICLES.values() for v in vlist]
+    active_vehicles_set = get_active_vehicles_in_month(engine, start_date, end_date, all_assigned_vehicles)
+
+    # Calculate per-FM active/inactive
+    fm_active = {}
+    for fm, vehicles in FLEET_MANAGER_VEHICLES.items():
+        active = [v for v in vehicles if v in active_vehicles_set]
+        fm_active[fm] = {'total': len(vehicles), 'active': len(active), 'inactive': len(vehicles) - len(active)}
+
+    total_active = sum(f['active'] for f in fm_active.values())
+    total_inactive = sum(f['inactive'] for f in fm_active.values())
+
+    # Styled vehicle assignment cards
+    def vehicle_card(label, total, active, inactive, is_total=False):
+        if is_total:
+            bg = "linear-gradient(135deg, #1a1a4e 0%, #16213e 100%)"
+            border = "#5dade2"
+            size = "2rem"
+        else:
+            bg = "linear-gradient(135deg, #1e1e2f 0%, #16213e 100%)"
+            border = "#7d3c98"
+            size = "1.5rem"
+        return f"""
+        <div style="background:{bg}; padding:15px; border-radius:12px; border:1px solid {border}; box-shadow:0 3px 10px rgba(0,0,0,0.3); text-align:center;">
+            <p style="margin:0; color:#bbb; font-size:0.8rem;">{label}</p>
+            <p style="margin:4px 0; color:white; font-size:{size}; font-weight:bold;">{total}</p>
+            <p style="margin:0; font-size:0.8rem;"><span style="color:#58d68d;">Active: {active}</span> &nbsp;|&nbsp; <span style="color:#f1948a;">Not Active: {inactive}</span></p>
+        </div>"""
+
+    cards_html = '<div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:15px;">'
+    cards_html += f'<div style="flex:1; min-width:180px;">{vehicle_card("Total Vehicles", len(vehicle_list_df), total_active, total_inactive, True)}</div>'
+    for fm_name in ['VISHAL', 'GOPI', 'JAGDISH', 'PRAVEEN']:
+        fa = fm_active[fm_name]
+        cards_html += f'<div style="flex:1; min-width:150px;">{vehicle_card(fm_name, fa["total"], fa["active"], fa["inactive"])}</div>'
+    cards_html += '</div>'
+    st.markdown(cards_html, unsafe_allow_html=True)
+
+    with st.expander("View Vehicle List", expanded=False):
+        # Add active status to the list
+        vehicle_list_df['Status'] = vehicle_list_df['Vehicle No'].apply(lambda v: 'Active' if v in active_vehicles_set else 'Not Active')
+        # Show only Not Active vehicles
+        not_active_df = vehicle_list_df[vehicle_list_df['Status'] == 'Not Active'].reset_index(drop=True)
+        if not_active_df.empty:
+            st.info("All vehicles are active this month.")
+        else:
+            st.markdown(create_detail_table(not_active_df, "Not Active Vehicles"), unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # --- Section 2: Fleet Manager Performance ---
+    st.markdown("#### 📊 Fleet Manager Performance")
+
+    # Get all performance data for selected month
+    perf_df = get_fleet_manager_performance(engine, start_date, end_date, FLEET_MANAGER_VEHICLES)
+
+    if perf_df.empty:
+        st.info("No performance data available for fleet managers.")
+        return
+
+    # Summary metrics as styled cards
+    total_rev = perf_df['total_revenue'].sum()
+    total_contrib = perf_df['contribution'].sum()
+    avg_contrib_pct = (total_contrib / total_rev * 100) if total_rev > 0 else 0
+    total_active_v = int(perf_df['active_vehicles'].sum())
+    total_trips = int(perf_df['loaded_trip_count'].sum())
+    total_delays = int(perf_df['delay_count'].sum())
+    total_pod = int(perf_df['pod_damage_count'].sum())
+    total_repair = perf_df['repair_amount'].sum()
+    total_challan = perf_df['challan_amount'].sum()
+    total_safety = int(perf_df['total_safety_violations'].sum())
+
+    def metric_card(label, value, color="#5dade2"):
+        return f"""
+        <div style="background:linear-gradient(135deg,#1a1a2e,#16213e); padding:14px 10px; border-radius:12px; border-left:4px solid {color}; box-shadow:0 3px 10px rgba(0,0,0,0.25); text-align:center; flex:1; min-width:140px;">
+            <p style="margin:0; color:#aaa; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px;">{label}</p>
+            <p style="margin:5px 0 0 0; color:{color}; font-size:1.3rem; font-weight:bold;">{value}</p>
+        </div>"""
+
+    metrics_html = '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">'
+    metrics_html += metric_card("Fleet Managers", len(perf_df), "#a29bfe")
+    metrics_html += metric_card("Active Vehicles", total_active_v, "#58d68d")
+    metrics_html += metric_card("Total Trips", total_trips, "#5dade2")
+    metrics_html += metric_card("Total Revenue", f"₹{total_rev:,.0f}", "#f7dc6f")
+    metrics_html += metric_card("Safety Violations", total_safety, "#f1948a")
+    metrics_html += '</div>'
+    metrics_html += '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:15px;">'
+    metrics_html += metric_card("Total Delays", total_delays, "#e74c3c")
+    metrics_html += metric_card("POD Damages", total_pod, "#e67e22")
+    metrics_html += metric_card("Repair Cost", f"₹{total_repair:,.0f}", "#f39c12")
+    metrics_html += metric_card("Challan Amount", f"₹{total_challan:,.0f}", "#d35400")
+    metrics_html += metric_card("Avg Contribution %", f"{avg_contrib_pct:.1f}%", "#2ecc71")
+    metrics_html += '</div>'
+    st.markdown(metrics_html, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # Fleet Manager comparison cards
+    total_all_revenue = perf_df['total_revenue'].sum()
+    for _, row in perf_df.iterrows():
+        fm_name = row['fleet_manager']
+        contrib_pct = (row['total_revenue'] / total_all_revenue * 100) if total_all_revenue > 0 else 0
+        if contrib_pct >= 50:
+            card_gradient = "linear-gradient(135deg, #1a3d35 0%, #0e2a20 100%)"
+            border_color = "#06d6a0"
+            pct_color = "#58d68d"
+        elif contrib_pct >= 30:
+            card_gradient = "linear-gradient(135deg, #3d3a1a 0%, #2a2710 100%)"
+            border_color = "#ffd60a"
+            pct_color = "#f7dc6f"
+        else:
+            card_gradient = "linear-gradient(135deg, #3d1a2a 0%, #2a1020 100%)"
+            border_color = "#f72585"
+            pct_color = "#f1948a"
+
+        st.markdown(f"""
+        <div style="background: {card_gradient}; padding: 20px; border-radius: 15px; margin-bottom: 15px; border-left: 5px solid {border_color}; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                <div>
+                    <h3 style="margin:0; color: white; font-size: 1.4rem;">🚛 {fm_name}</h3>
+                    <p style="margin: 5px 0 0 0; color: #bbb;">Active Vehicles: {int(row['active_vehicles'])} | Assigned: {len(FLEET_MANAGER_VEHICLES[fm_name])}</p>
+                </div>
+                <div style="text-align: center;">
+                    <p style="margin:0; color: #bbb; font-size: 0.85rem;">Contribution</p>
+                    <p style="margin:0; color: {pct_color}; font-size: 2rem; font-weight: bold;">{contrib_pct:.1f}%</p>
+                </div>
+            </div>
+            <div style="display: flex; gap: 20px; margin-top: 15px; flex-wrap: wrap;">
+                <div style="text-align:center; flex:1;">
+                    <p style="margin:0; color:#bbb; font-size:0.8rem;">Total Revenue</p>
+                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">₹{row['total_revenue']:,.0f}</p>
+                </div>
+                <div style="text-align:center; flex:1;">
+                    <p style="margin:0; color:#bbb; font-size:0.8rem;">Avg Revenue</p>
+                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">₹{(row['total_revenue'] / row['active_vehicles'] if row['active_vehicles'] > 0 else 0):,.0f}</p>
+                </div>
+                <div style="text-align:center; flex:1;">
+                    <p style="margin:0; color:#bbb; font-size:0.8rem;">Total KMS</p>
+                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">{row['total_running_kms']:,.0f}</p>
+                </div>
+                <div style="text-align:center; flex:1;">
+                    <p style="margin:0; color:#bbb; font-size:0.8rem;">Avg KM</p>
+                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">{(row['total_running_kms'] / row['active_vehicles'] if row['active_vehicles'] > 0 else 0):,.0f}</p>
+                </div>
+                <div style="text-align:center; flex:1;">
+                    <p style="margin:0; color:#bbb; font-size:0.8rem;">Loaded Trips</p>
+                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">{int(row['loaded_trip_count'])}</p>
+                </div>
+                <div style="text-align:center; flex:1;">
+                    <p style="margin:0; color:#bbb; font-size:0.8rem;">Delay Trip</p>
+                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">{int(row['delay_count'])}</p>
+                </div>
+                <div style="text-align:center; flex:1;">
+                    <p style="margin:0; color:#bbb; font-size:0.8rem;">% Delay Load</p>
+                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">{(row['delay_count'] / row['loaded_trip_count'] * 100 if row['loaded_trip_count'] > 0 else 0):.2f}%</p>
+                </div>
+                <div style="text-align:center; flex:1;">
+                    <p style="margin:0; color:#bbb; font-size:0.8rem;">Car Lifted</p>
+                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">{int(row['total_qty'])}</p>
+                </div>
+                <div style="text-align:center; flex:1;">
+                    <p style="margin:0; color:#bbb; font-size:0.8rem;">Delay Car Lifted</p>
+                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">{int(row['delay_car_lifted'])}</p>
+                </div>
+                <div style="text-align:center; flex:1;">
+                    <p style="margin:0; color:#bbb; font-size:0.8rem;">POD Damage (Cars)</p>
+                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">{int(row['pod_damage_count'])}</p>
+                </div>
+                <div style="text-align:center; flex:1;">
+                    <p style="margin:0; color:#bbb; font-size:0.8rem;">WD (No Driver)</p>
+                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">{int(row['without_driver'])}</p>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # --- Pending POD Fleet Manager Wise ---
+    st.markdown("#### 📦 Pending POD - Fleet Manager Wise")
+    pending_pod_df, pending_pod_detail = get_pending_pod_fleet(engine, FLEET_MANAGER_VEHICLES)
+    if pending_pod_df.empty:
+        st.info("No pending POD data found.")
+    else:
+        # Build custom table with merged month headers
+        cols = [c for c in pending_pod_df.columns if c != 'Fleet Manager']
+        # Extract unique months in order
+        months = []
+        for c in cols:
+            month = c.rsplit(' ', 1)[0]
+            if month not in months:
+                months.append(month)
+
+        pod_html = """<div style="overflow-x:auto; border-radius:12px; border:2px solid #6a0dad; box-shadow: 0 4px 15px rgba(106,13,173,0.3);">
+        <table style="width:100%; border-collapse:separate; border-spacing:0; font-size:0.85rem;">"""
+        # Header row 1: Fleet Manager + month names spanning 2 cols each
+        pod_html += '<tr><th rowspan="2" style="background:linear-gradient(135deg,#6a0dad,#8e24aa); color:white; padding:10px 14px; border-bottom:2px solid #9b59b6; text-align:center; border-right:2px solid #9b59b6; border-top-left-radius:10px;">Fleet Manager</th>'
+        for i, m in enumerate(months):
+            radius = 'border-top-right-radius:10px;' if i == len(months) - 1 else ''
+            pod_html += f'<th colspan="2" style="background:linear-gradient(135deg,#1a5276,#2471a3); color:white; padding:10px 8px; border-bottom:1px solid #5dade2; border-right:2px solid #2e86c1; text-align:center; font-size:0.9rem; {radius}">{m}</th>'
+        pod_html += '</tr>'
+        # Header row 2: Qty and No of CN sub-columns
+        pod_html += '<tr>'
+        for m in months:
+            pod_html += '<th style="background:linear-gradient(135deg,#6a0dad,#8e24aa); color:white; padding:8px 6px; border-bottom:2px solid #9b59b6; border-right:1px solid #7d3c98; text-align:center; font-size:0.8rem;">Qty</th>'
+            pod_html += '<th style="background:linear-gradient(135deg,#6a0dad,#8e24aa); color:white; padding:8px 6px; border-bottom:2px solid #9b59b6; border-right:2px solid #2e86c1; text-align:center; font-size:0.8rem;">No of CN</th>'
+        pod_html += '</tr>'
+        # Data rows
+        for idx, row in pending_pod_df.iterrows():
+            is_total = row['Fleet Manager'] == 'GRAND TOTAL'
+            if is_total:
+                bg = 'background:linear-gradient(135deg,#2c2c54,#3d3d6b);'
+                fw = 'font-weight:bold;'
+                border_top = 'border-top:2px solid #6a0dad;'
+            else:
+                bg = f'background:{"#1a1a2e" if idx % 2 == 0 else "#16213e"};'
+                fw = ''
+                border_top = ''
+            is_last = idx == len(pending_pod_df) - 1
+            bl_radius = 'border-bottom-left-radius:10px;' if is_last else ''
+            pod_html += f'<tr style="{bg}">'
+            pod_html += f'<td style="padding:9px 14px; border-right:2px solid #333; border-bottom:1px solid #333; color:white; text-align:center; {fw} {border_top} {bl_radius}">{row["Fleet Manager"]}</td>'
+            for mi, m in enumerate(months):
+                qty_val = row.get(f"{m} Qty", 0)
+                cn_val = row.get(f"{m} CN", 0)
+                br_radius = 'border-bottom-right-radius:10px;' if is_last and mi == len(months) - 1 else ''
+                pod_html += f'<td style="padding:9px 6px; border-right:1px solid #333; border-bottom:1px solid #333; color:white; text-align:center; {fw} {border_top}">{qty_val}</td>'
+                pod_html += f'<td style="padding:9px 6px; border-right:2px solid #333; border-bottom:1px solid #333; color:white; text-align:center; {fw} {border_top} {br_radius}">{cn_val}</td>'
+            pod_html += '</tr>'
+        pod_html += '</table></div>'
+        st.markdown(pod_html, unsafe_allow_html=True)
+
+        # Download button for pending POD detail data
+        if not pending_pod_detail.empty:
+            csv_data = pending_pod_detail.to_csv(index=False)
+            filename = f"pending_pod_{datetime.now().strftime('%Y%m%d')}.csv"
+            st.download_button(
+                label="📥 Download Pending POD Data",
+                data=csv_data,
+                file_name=filename,
+                mime="text/csv",
+                key="download_pending_pod"
+            )
+
+    st.markdown("---")
+
+    # Detailed comparison table
+    st.markdown("#### 📋 Detailed Comparison")
+
+    view_option = st.selectbox(
+        "View",
+        ["Performance Summary", "Safety Details", "Financial Details", "All Columns"],
+        key="fm_view_option"
+    )
+
+    if view_option == "Performance Summary":
+        perf_df['avg_revenue'] = perf_df.apply(lambda r: r['total_revenue'] / r['active_vehicles'] if r['active_vehicles'] > 0 else 0, axis=1)
+        perf_df['avg_km'] = perf_df.apply(lambda r: r['total_running_kms'] / r['active_vehicles'] if r['active_vehicles'] > 0 else 0, axis=1)
+        perf_df['delay_load_pct'] = perf_df.apply(lambda r: (r['delay_count'] / r['loaded_trip_count'] * 100) if r['loaded_trip_count'] > 0 else 0, axis=1)
+        display_cols = ['fleet_manager', 'total_revenue', 'avg_revenue', 'total_running_kms',
+                       'avg_km', 'loaded_trip_count', 'delay_count', 'delay_load_pct',
+                       'total_qty', 'delay_car_lifted', 'pod_damage_count', 'without_driver']
+        col_names = ['Fleet Manager', 'Total Revenue', 'Avg Revenue', 'Total KMS',
+                    'Avg KM', 'Loaded Trips', 'Delay Trip', '% Delay Load',
+                    'Car Lifted', 'Delay Car Lifted', 'POD Damage (Cars)', 'WD (No Driver)']
+    elif view_option == "Safety Details":
+        display_cols = ['fleet_manager', 'active_vehicles', 'overspeed_days', 'night_drive_days',
+                       'hard_brake_days', 'harsh_acc_count', 'freerun_days', 'idling_time', 'idling_fuel', 'total_safety_violations']
+        col_names = ['Fleet Manager', 'Active Vehicles', 'Overspeed (In No. of Days)', 'Night Drive (In No. of Days)', 'Hard Brake (In No. of Days)', 'Harsh Acc (In No. of Times)', 'Freerun (In No. of Days)', 'Idling Time (In Minutes)', 'Idling Fuel (In Litres)', 'Total']
+    elif view_option == "Financial Details":
+        display_cols = ['fleet_manager', 'active_vehicles', 'total_revenue', 'total_advance',
+                       'repair_amount', 'challan_count', 'challan_amount', 'contribution_pct']
+        col_names = ['Fleet Manager', 'Active Vehicles', 'Revenue', 'Advance', 'Repair', 'Challans', 'Challan Amt', 'Contrib %']
+    else:
+        display_cols = ['fleet_manager', 'active_vehicles', 'loaded_trip_count', 'total_revenue',
+                       'total_running_kms', 'delay_count', 'pod_damage_count', 'repair_amount',
+                       'challan_count', 'total_safety_violations', 'contribution_pct']
+        col_names = ['Fleet Manager', 'Vehicles', 'Trips', 'Revenue', 'KMs', 'Delays', 'POD', 'Repair',
+                    'Challans', 'Safety', 'Contrib %']
+
+    display_df = perf_df[display_cols].copy()
+
+    for col in display_df.columns:
+        if col in ['total_revenue', 'total_advance', 'repair_amount', 'challan_amount', 'contribution', 'avg_revenue']:
+            display_df[col] = display_df[col].apply(lambda x: f"₹{x:,.0f}")
+        elif col in ['total_running_kms', 'loaded_kms', 'empty_kms', 'gps_kms', 'avg_km']:
+            display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}")
+        elif col in ['contribution_pct', 'delay_load_pct']:
+            display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}%")
+        elif col == 'idling_time':
+            display_df[col] = display_df[col].apply(lambda x: f"{x:.1f}")
+        elif col == 'idling_fuel':
+            display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}")
+
+    display_df.columns = col_names
+    st.markdown(create_detail_table(display_df, "Fleet Manager Performance"), unsafe_allow_html=True)
+
+    # --- Section 3: Per-vehicle breakdown for selected fleet manager ---
+    st.markdown("---")
+    st.markdown("#### 🔍 Vehicle-wise Breakdown")
+
+    fm_detail = st.selectbox(
+        "Select Fleet Manager for Vehicle Details",
+        list(FLEET_MANAGER_VEHICLES.keys()),
+        key="fm_detail_select"
+    )
+
+    vehicle_perf_df = get_fleet_vehicle_performance(engine, start_date, end_date, FLEET_MANAGER_VEHICLES[fm_detail])
+
+    if vehicle_perf_df.empty:
+        st.info(f"No trip data found for {fm_detail}'s vehicles in the selected period.")
+    else:
+        vehicle_perf_df['total_safety_violations'] = (
+            vehicle_perf_df['overspeed_days'] + vehicle_perf_df['night_drive_days'] +
+            vehicle_perf_df['hard_brake_days'] + vehicle_perf_df['harsh_acc_count'] +
+            vehicle_perf_df['freerun_days']
+        )
+        vehicle_perf_df['contribution_pct'] = vehicle_perf_df.apply(
+            lambda r: (r['contribution'] / r['total_revenue'] * 100) if r['total_revenue'] > 0 else 0, axis=1
+        )
+
+        st.markdown(f"**{fm_detail}** — {len(vehicle_perf_df)} active vehicles out of {len(FLEET_MANAGER_VEHICLES[fm_detail])} assigned")
+
+        v_display = vehicle_perf_df[['vehicle_no', 'loaded_trip_count', 'total_revenue',
+                                      'total_running_kms', 'delay_count', 'pod_damage_count',
+                                      'repair_amount', 'challan_count', 'total_safety_violations',
+                                      'contribution_pct']].copy()
+        for col in v_display.columns:
+            if col in ['total_revenue', 'repair_amount', 'challan_amount', 'contribution']:
+                v_display[col] = v_display[col].apply(lambda x: f"₹{x:,.0f}")
+            elif col in ['total_running_kms']:
+                v_display[col] = v_display[col].apply(lambda x: f"{x:,.0f}")
+            elif col == 'contribution_pct':
+                v_display[col] = v_display[col].apply(lambda x: f"{x:.1f}%")
+
+        v_display.columns = ['Vehicle', 'Trips', 'Revenue', 'KMs', 'Delays', 'POD', 'Repair',
+                            'Challans', 'Safety', 'Contrib %']
+        st.markdown(create_detail_table(v_display, f"{fm_detail} Vehicle Performance"), unsafe_allow_html=True)
 
 def show_low_performance_drivers(engine):
     """Show low performance drivers tab with all metrics from Overall Performance."""
