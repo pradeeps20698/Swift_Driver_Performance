@@ -2398,16 +2398,20 @@ def main():
     # Store in session state for access
     st.session_state.all_drivers_cache = all_drivers_cache
 
-    # Create tabs
-    tab1, tab2, tab3 = st.tabs(["📊 Overall Performance", "⚠️ Low Performance Driver", "🚛 Fleet Manager"])
+    # Create tabs - use session state to remember selected tab
+    if 'active_tab' not in st.session_state:
+        st.session_state.active_tab = "🚛 Fleet Manager"
+    tab_names = ["📊 Overall Performance", "⚠️ Low Performance Driver", "🚛 Fleet Manager"]
+    default_tab = tab_names.index(st.session_state.active_tab) if st.session_state.active_tab in tab_names else 0
 
-    with tab1:
+    selected_tab = st.radio("Navigation", tab_names, index=default_tab, horizontal=True, key="tab_selector", label_visibility="collapsed")
+    st.session_state.active_tab = selected_tab
+
+    if selected_tab == "📊 Overall Performance":
         show_overall_performance(engine)
-
-    with tab2:
+    elif selected_tab == "⚠️ Low Performance Driver":
         show_low_performance_drivers(engine)
-
-    with tab3:
+    elif selected_tab == "🚛 Fleet Manager":
         show_fleet_manager(engine)
 
 def show_fleet_manager(engine):
@@ -2438,7 +2442,6 @@ def show_fleet_manager(engine):
 
     # --- Month Filter ---
     current_date = datetime.now()
-    # Build month options: last 6 months
     month_options = []
     for i in range(6):
         year = current_date.year
@@ -2458,7 +2461,6 @@ def show_fleet_manager(engine):
             key="fm_month_select"
         )
 
-    # Calculate start/end date from selected month
     sel_year, sel_mon = map(int, selected_month.split("-"))
     start_date = datetime(sel_year, sel_mon, 1)
     last_day = calendar.monthrange(sel_year, sel_mon)[1]
@@ -2569,7 +2571,8 @@ def show_fleet_manager(engine):
     metrics_html += metric_card("POD Damages", total_pod, "#e67e22")
     metrics_html += metric_card("Repair Cost", f"₹{total_repair:,.0f}", "#f39c12")
     metrics_html += metric_card("Challan Amount", f"₹{total_challan:,.0f}", "#d35400")
-    metrics_html += metric_card("Avg Contribution %", f"{avg_contrib_pct:.1f}%", "#2ecc71")
+    total_qty = int(perf_df['total_qty'].sum())
+    metrics_html += metric_card("Total Car Lifted", f"{total_qty:,}", "#2ecc71")
     metrics_html += '</div>'
     st.markdown(metrics_html, unsafe_allow_html=True)
 
