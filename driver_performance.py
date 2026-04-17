@@ -2897,11 +2897,11 @@ def show_low_performance_drivers(engine):
         sort_option = st.selectbox(
             "📋 Sort By",
             ["Contribution % (Low to High)",
-             "Safety Violations (High to Low)",
-             "Challan Count (High to Low)",
-             "Repair Amount (High to Low)",
-             "Delay Count (High to Low)",
-             "Revenue (High to Low)"]
+             "Safety Violations (Low to High)",
+             "Challan Count (Low to High)",
+             "Repair Amount (Low to High)",
+             "Delay Count (Low to High)",
+             "Revenue (Low to High)"]
         )
     with col3:
         view_option = st.selectbox(
@@ -2927,11 +2927,11 @@ def show_low_performance_drivers(engine):
     # Apply sort
     sort_map = {
         "Contribution % (Low to High)": ("contribution_pct", True),
-        "Safety Violations (High to Low)": ("total_safety_violations", False),
-        "Challan Count (High to Low)": ("challan_count", False),
-        "Repair Amount (High to Low)": ("repair_amount", False),
-        "Delay Count (High to Low)": ("delay_count", False),
-        "Revenue (High to Low)": ("total_revenue", False)
+        "Safety Violations (Low to High)": ("total_safety_violations", True),
+        "Challan Count (Low to High)": ("challan_count", True),
+        "Repair Amount (Low to High)": ("repair_amount", True),
+        "Delay Count (Low to High)": ("delay_count", True),
+        "Revenue (Low to High)": ("total_revenue", True)
     }
     sort_col, ascending = sort_map[sort_option]
     filtered_df = filtered_df.sort_values(sort_col, ascending=ascending)
@@ -3438,6 +3438,67 @@ def show_overall_performance(engine):
 
         safety_df = pd.DataFrame(safety_table_data)
         st.markdown(create_styled_table(safety_df), unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # === CONTRIBUTION % TABLE (from swift_trip_settlement) ===
+    st.markdown(f"""
+    <div class="performance-title">
+        Contribution %<br/>of<br/>{driver_name}[{driver_code}]
+    </div>
+    """, unsafe_allow_html=True)
+
+    try:
+        with engine.connect() as conn:
+            settle_result = conn.execute(text(f"""
+                SELECT TO_CHAR(trip_settlement_date, 'YYYY-MM') as month,
+                    SUM(COALESCE(market_freight, 0)) as market_freight,
+                    SUM(COALESCE(total_trip_sheet_exp, 0)) as total_trip_sheet_exp,
+                    SUM(COALESCE(amount_contribution, 0)) as amount_contribution
+                FROM swift_trip_settlement
+                WHERE driver_code = '{driver_code}'
+                AND trip_settlement_date >= '2025-09-01'
+                AND trip_settlement_date < ('{end_date}'::date + interval '1 day')
+                AND market_freight > 0
+                GROUP BY TO_CHAR(trip_settlement_date, 'YYYY-MM')
+                ORDER BY month
+            """))
+            settle_rows = settle_result.fetchall()
+    except Exception as e:
+        st.error(f"Error loading settlement data: {e}")
+        settle_rows = []
+
+    if settle_rows:
+        contrib_data = {
+            'Event': ['Market Freight (₹)', 'Trip Sheet Exp (₹)', 'Contribution (₹)', 'Contribution %']
+        }
+        for month in months:
+            row = next((r for r in settle_rows if r[0] == month), None)
+            if row:
+                mf, exp, contrib = float(row[1]), float(row[2]), float(row[3])
+                cpct = (contrib / mf * 100) if mf > 0 else 0
+            else:
+                mf, exp, contrib, cpct = 0, 0, 0, 0
+            contrib_data[month] = [
+                f"₹{mf:,.0f}",
+                f"₹{exp:,.0f}",
+                f"₹{contrib:,.0f}",
+                f"{cpct:.1f}%"
+            ]
+        total_mf = sum(float(r[1]) for r in settle_rows if r[0] in months)
+        total_exp = sum(float(r[2]) for r in settle_rows if r[0] in months)
+        total_contrib = sum(float(r[3]) for r in settle_rows if r[0] in months)
+        total_cpct = (total_contrib / total_mf * 100) if total_mf > 0 else 0
+        contrib_data['Total'] = [
+            f"₹{total_mf:,.0f}",
+            f"₹{total_exp:,.0f}",
+            f"₹{total_contrib:,.0f}",
+            f"{total_cpct:.1f}%"
+        ]
+        contrib_df = pd.DataFrame(contrib_data)
+        st.markdown(create_styled_table(contrib_df), unsafe_allow_html=True)
+    else:
+        st.info("No settlement data available for this driver.")
 
     st.markdown("---")
 
