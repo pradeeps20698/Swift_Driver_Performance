@@ -40,14 +40,22 @@ __pycache__/
 venv/
 ENV/
 
-# macOS
-.DS_Store
 
-# Logs
-*.log
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

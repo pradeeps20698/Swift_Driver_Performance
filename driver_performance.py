@@ -359,7 +359,7 @@ def load_all_data_to_cache(_engine, cache_store):
                     SELECT * FROM swift_trip_log
                     WHERE driver_code = '{driver_code}'
                     AND loading_date >= '{start_date}'
-                    AND loading_date <= '{end_date}'
+                    AND loading_date < ('{end_date}'::date + interval '1 day')
                     ORDER BY loading_date DESC
                     """
                     trip_result = conn.execute(text(trip_query))
@@ -379,7 +379,7 @@ def load_all_data_to_cache(_engine, cache_store):
                     challan_query = f"""
                     SELECT * FROM challan_data
                     WHERE driver_code = '{driver_code}'
-                    AND challan_date >= '{start_date}' AND challan_date <= '{end_date}'
+                    AND challan_date >= '{start_date}' AND challan_date < ('{end_date}'::date + interval '1 day')
                     """
                     challan_result = conn.execute(text(challan_query))
                     challan_rows = challan_result.fetchall()
@@ -389,7 +389,7 @@ def load_all_data_to_cache(_engine, cache_store):
                     repair_query = f"""
                     SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data
                     WHERE driver_code = '{driver_code}'
-                    AND COALESCE(voucher_date, doe) >= '{start_date}' AND COALESCE(voucher_date, doe) <= '{end_date}'
+                    AND COALESCE(voucher_date, doe) >= '{start_date}' AND COALESCE(voucher_date, doe) < ('{end_date}'::date + interval '1 day')
                     """
                     repair_result = conn.execute(text(repair_query))
                     repair_rows = repair_result.fetchall()
@@ -401,7 +401,7 @@ def load_all_data_to_cache(_engine, cache_store):
                     FROM cn_data cn
                     INNER JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
                     WHERE stl.driver_code = '{driver_code}'
-                    AND stl.loading_date >= '{start_date}' AND stl.loading_date <= '{end_date}'
+                    AND stl.loading_date >= '{start_date}' AND stl.loading_date < ('{end_date}'::date + interval '1 day')
                     AND (cn.pod_status ILIKE '%Delay%' OR cn.pod_status ILIKE '%NOT OK%' OR cn.pod_status ILIKE '%NOT OKAY%')
                     """
                     pod_result = conn.execute(text(pod_query))
@@ -412,7 +412,7 @@ def load_all_data_to_cache(_engine, cache_store):
                     safety_query = f"""
                     SELECT * FROM day_wise_gps_km
                     WHERE driver_code = '{driver_code}'
-                    AND date >= '{start_date}' AND date <= '{end_date}'
+                    AND date >= '{start_date}' AND date < ('{end_date}'::date + interval '1 day')
                     """
                     safety_result = conn.execute(text(safety_query))
                     safety_rows = safety_result.fetchall()
@@ -422,7 +422,7 @@ def load_all_data_to_cache(_engine, cache_store):
                     intangles_query = f"""
                     SELECT * FROM intangles_alert_logs
                     WHERE driver_code = '{driver_code}'
-                    AND event_time >= '{start_date}' AND event_time <= '{end_date}'
+                    AND event_time >= '{start_date}' AND event_time < ('{end_date}'::date + interval '1 day')
                     """
                     intangles_result = conn.execute(text(intangles_query))
                     intangles_rows = intangles_result.fetchall()
@@ -517,7 +517,7 @@ def get_all_driver_data(_engine, driver_code, start_str, end_str):
             SELECT * FROM swift_trip_log
             WHERE driver_code = '{driver_code}'
             AND loading_date >= '{start_str}'
-            AND loading_date <= '{end_str}'
+            AND loading_date < ('{end_str}'::date + interval '1 day')
             ORDER BY loading_date DESC
             """
             trip_result = conn.execute(text(trip_query))
@@ -539,7 +539,7 @@ def get_all_driver_data(_engine, driver_code, start_str, end_str):
             SELECT * FROM challan_data
             WHERE driver_code = '{driver_code}'
             AND challan_date >= '{start_str}'
-            AND challan_date <= '{end_str}'
+            AND challan_date < ('{end_str}'::date + interval '1 day')
             ORDER BY challan_date DESC
             """
             challan_result = conn.execute(text(challan_query))
@@ -551,7 +551,7 @@ def get_all_driver_data(_engine, driver_code, start_str, end_str):
             SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data
             WHERE driver_code = '{driver_code}'
             AND COALESCE(voucher_date, doe) >= '{start_str}'
-            AND COALESCE(voucher_date, doe) <= '{end_str}'
+            AND COALESCE(voucher_date, doe) < ('{end_str}'::date + interval '1 day')
             ORDER BY effective_date DESC
             """
             repair_result = conn.execute(text(repair_query))
@@ -565,7 +565,7 @@ def get_all_driver_data(_engine, driver_code, start_str, end_str):
             INNER JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
             WHERE stl.driver_code = '{driver_code}'
             AND stl.loading_date >= '{start_str}'
-            AND stl.loading_date <= '{end_str}'
+            AND stl.loading_date < ('{end_str}'::date + interval '1 day')
             AND (
                 cn.pod_status ILIKE '%Delay%'
                 OR cn.pod_status ILIKE '%NOT OK%'
@@ -585,7 +585,7 @@ def get_all_driver_data(_engine, driver_code, start_str, end_str):
             FROM day_wise_gps_km
             WHERE driver_code = '{driver_code}'
             AND date >= '{start_str}'
-            AND date <= '{end_str}'
+            AND date < ('{end_str}'::date + interval '1 day')
             GROUP BY TO_CHAR(date, 'YYYY-MM')
             ORDER BY month
             """
@@ -623,7 +623,7 @@ def get_all_driver_data(_engine, driver_code, start_str, end_str):
             FROM intangles_alert_logs
             WHERE driver_code = '{driver_code}'
             AND event_time >= '{start_str}'
-            AND event_time <= '{end_str}'
+            AND event_time < ('{end_str}'::date + interval '1 day')
             GROUP BY TO_CHAR(event_time, 'YYYY-MM')
             ORDER BY month
             """
@@ -712,7 +712,7 @@ def get_trip_data(_engine, driver_code, start_date, end_date):
     SELECT * FROM swift_trip_log
     WHERE driver_code = '{driver_code}'
     AND loading_date >= '{start_date}'
-    AND loading_date <= '{end_date}'
+    AND loading_date < ('{end_date}'::date + interval '1 day')
     ORDER BY loading_date DESC
     """
     try:
@@ -734,7 +734,7 @@ def get_challan_data(_engine, driver_code, start_date, end_date):
     SELECT * FROM challan_data
     WHERE driver_code = '{driver_code}'
     AND challan_date >= '{start_date}'
-    AND challan_date <= '{end_date}'
+    AND challan_date < ('{end_date}'::date + interval '1 day')
     ORDER BY challan_date DESC
     """
     try:
@@ -763,7 +763,7 @@ def get_pod_damage_data(_engine, driver_code, start_date, end_date):
     INNER JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
     WHERE stl.driver_code = '{driver_code}'
     AND stl.loading_date >= '{start_date}'
-    AND stl.loading_date <= '{end_date}'
+    AND stl.loading_date < ('{end_date}'::date + interval '1 day')
     AND (
         cn.pod_status ILIKE '%Delay%'
         OR cn.pod_status ILIKE '%NOT OK%'
@@ -789,7 +789,7 @@ def get_repair_data(_engine, driver_code, start_date, end_date):
     SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data
     WHERE driver_code = '{driver_code}'
     AND COALESCE(voucher_date, doe) >= '{start_date}'
-    AND COALESCE(voucher_date, doe) <= '{end_date}'
+    AND COALESCE(voucher_date, doe) < ('{end_date}'::date + interval '1 day')
     AND (dr_party NOT ILIKE '%DEF%' OR dr_party IS NULL)
     ORDER BY COALESCE(voucher_date, doe) DESC
     """
@@ -835,7 +835,7 @@ def get_gps_km_for_driver(_engine, driver_code, start_date, end_date):
         FROM swift_trip_log
         WHERE driver_code = '{driver_code}'
         AND loading_date >= '{start_date}'
-        AND loading_date <= '{end_date}'
+        AND loading_date < ('{end_date}'::date + interval '1 day')
         ORDER BY vehicle_no, loading_date
         """
         with _engine.connect() as conn:
@@ -864,7 +864,7 @@ def get_gps_km_for_driver(_engine, driver_code, start_date, end_date):
         FROM fvts_vehicles
         WHERE vehicle_no IN ('{vehicles_str}')
         AND date_time >= '{start_date}'
-        AND date_time <= '{end_date}'
+        AND date_time < ('{end_date}'::date + interval '1 day')
         ORDER BY vehicle_no, date_time
         """
         with _engine.connect() as conn:
@@ -922,7 +922,7 @@ def get_safety_data(_engine, driver_code, start_date, end_date):
     FROM day_wise_gps_km
     WHERE driver_code = '{driver_code}'
     AND date >= '{start_date}'
-    AND date <= '{end_date}'
+    AND date < ('{end_date}'::date + interval '1 day')
     GROUP BY TO_CHAR(date, 'YYYY-MM')
     ORDER BY month
     """
@@ -981,7 +981,7 @@ def get_intangles_safety_data(_engine, driver_code, start_date, end_date):
     FROM intangles_alert_logs
     WHERE driver_code = '{driver_code}'
     AND event_time >= '{start_date}'
-    AND event_time <= '{end_date}'
+    AND event_time < ('{end_date}'::date + interval '1 day')
     GROUP BY TO_CHAR(event_time, 'YYYY-MM')
     ORDER BY month
     """
@@ -1047,7 +1047,7 @@ def get_gps_km_from_daily(_engine, driver_code, start_date, end_date):
     FROM day_wise_gps_km
     WHERE driver_code = '{driver_code}'
     AND date >= '{start_date}'
-    AND date <= '{end_date}'
+    AND date < ('{end_date}'::date + interval '1 day')
     GROUP BY TO_CHAR(date, 'YYYY-MM')
     ORDER BY month
     """
@@ -1470,7 +1470,7 @@ def get_safety_details(_engine, driver_code, start_date, end_date, safety_type='
     FROM day_wise_gps_km
     WHERE driver_code = '{driver_code}'
     AND date >= '{start_date}'
-    AND date <= '{end_date}'
+    AND date < ('{end_date}'::date + interval '1 day')
     AND {column} > 0
     ORDER BY date DESC
     """
@@ -1520,7 +1520,7 @@ def get_intangles_details(_engine, driver_code, start_date, end_date, alert_type
         WHERE driver_code = '{driver_code}'
         AND alert_type = '{alert_type}'
         AND event_time >= '{start_date}'
-        AND event_time <= '{end_date}'
+        AND event_time < ('{end_date}'::date + interval '1 day')
         ORDER BY event_time DESC
         """
     else:
@@ -1532,7 +1532,7 @@ def get_intangles_details(_engine, driver_code, start_date, end_date, alert_type
         WHERE driver_code = '{driver_code}'
         AND alert_type = '{alert_type}'
         AND event_time >= '{start_date}'
-        AND event_time <= '{end_date}'
+        AND event_time < ('{end_date}'::date + interval '1 day')
         ORDER BY event_time DESC
         """
     try:
@@ -1587,7 +1587,7 @@ def get_active_vehicles_in_month(_engine, start_date, end_date, vehicle_list):
     SELECT DISTINCT vehicle_no
     FROM swift_trip_log
     WHERE vehicle_no IN ('{vehicles_str}')
-    AND loading_date >= '{start_date}' AND loading_date <= '{end_date}'
+    AND loading_date >= '{start_date}' AND loading_date < ('{end_date}'::date + interval '1 day')
     """
     try:
         with _engine.connect() as conn:
@@ -1624,7 +1624,7 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
         FROM swift_trip_log
         WHERE vehicle_no IN ('{vehicles_str}')
         AND loading_date >= '{start_date}'
-        AND loading_date <= '{end_date}'
+        AND loading_date < ('{end_date}'::date + interval '1 day')
         GROUP BY vehicle_no
     ),
     vehicle_delays AS (
@@ -1633,7 +1633,7 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
         FROM swift_trip_log
         WHERE vehicle_no IN ('{vehicles_str}')
         AND trip_status = 'Loaded'
-        AND loading_date >= '{start_date}' AND loading_date <= '{end_date}'
+        AND loading_date >= '{start_date}' AND loading_date < ('{end_date}'::date + interval '1 day')
         AND unloading_date IS NOT NULL
         AND (
             (distance <= 400 AND unloading_date > loading_date + INTERVAL '2 days') OR
@@ -1647,7 +1647,7 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
         SELECT vehicle_no, COUNT(DISTINCT loading_date) as working_days
         FROM swift_trip_log
         WHERE vehicle_no IN ('{vehicles_str}')
-        AND loading_date >= '{start_date}' AND loading_date <= '{end_date}'
+        AND loading_date >= '{start_date}' AND loading_date < ('{end_date}'::date + interval '1 day')
         GROUP BY vehicle_no
     ),
     vehicle_pod AS (
@@ -1655,7 +1655,7 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
         FROM cn_data cn
         JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
         WHERE stl.vehicle_no IN ('{vehicles_str}')
-        AND stl.loading_date >= '{start_date}' AND stl.loading_date <= '{end_date}'
+        AND stl.loading_date >= '{start_date}' AND stl.loading_date < ('{end_date}'::date + interval '1 day')
         AND (cn.pod_status ILIKE '%Delay%' OR cn.pod_status ILIKE '%NOT OK%' OR cn.pod_status ILIKE '%NOT OKAY%')
         GROUP BY stl.vehicle_no
     ),
@@ -1663,7 +1663,7 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
         SELECT vm.swift_no as vehicle_no, COUNT(*) as challan_count, COALESCE(SUM(c.amount), 0) as challan_amount
         FROM challan_data c
         JOIN vehicle_name_map vm ON vm.gps_no = c.vehicle_no
-        WHERE c.challan_date >= '{start_date}' AND c.challan_date <= '{end_date}'
+        WHERE c.challan_date >= '{start_date}' AND c.challan_date < ('{end_date}'::date + interval '1 day')
         GROUP BY vm.swift_no
     ),
     vehicle_repairs AS (
@@ -1671,7 +1671,7 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
         FROM repair_data
         WHERE vehicle_no IN ('{vehicles_str}')
         AND COALESCE(voucher_date, doe) >= '{start_date}'
-        AND COALESCE(voucher_date, doe) <= '{end_date}'
+        AND COALESCE(voucher_date, doe) < ('{end_date}'::date + interval '1 day')
         GROUP BY vehicle_no
     ),
     vehicle_gps AS (
@@ -1680,7 +1680,7 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
             SUM(CASE WHEN g.night_drive > 0 THEN 1 ELSE 0 END) as night_drive_days
         FROM day_wise_gps_km g
         JOIN vehicle_name_map vm ON vm.gps_no = g.vehicle_no
-        WHERE g.date >= '{start_date}' AND g.date <= '{end_date}'
+        WHERE g.date >= '{start_date}' AND g.date < ('{end_date}'::date + interval '1 day')
         GROUP BY vm.swift_no
     ),
     vehicle_intangles AS (
@@ -1692,7 +1692,7 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
             COALESCE(SUM(CASE WHEN i.alert_type = 'idling' THEN i.fuel_consumed ELSE 0 END), 0) as idling_fuel
         FROM intangles_alert_logs i
         JOIN vehicle_name_map vm ON vm.gps_no = i.vehicle_plate
-        WHERE i.event_time >= '{start_date}' AND i.event_time <= '{end_date}'
+        WHERE i.event_time >= '{start_date}' AND i.event_time < ('{end_date}'::date + interval '1 day')
         GROUP BY vm.swift_no
     ),
     without_driver AS (
@@ -1771,7 +1771,7 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
         FROM swift_trip_log
         WHERE vehicle_no IN ('{vehicles_str}')
         AND loading_date >= '{start_date}'
-        AND loading_date <= '{end_date}'
+        AND loading_date < ('{end_date}'::date + interval '1 day')
         GROUP BY vehicle_no
     ),
     vehicle_delays AS (
@@ -1780,7 +1780,7 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
         FROM swift_trip_log
         WHERE vehicle_no IN ('{vehicles_str}')
         AND trip_status = 'Loaded'
-        AND loading_date >= '{start_date}' AND loading_date <= '{end_date}'
+        AND loading_date >= '{start_date}' AND loading_date < ('{end_date}'::date + interval '1 day')
         AND unloading_date IS NOT NULL
         AND (
             (distance <= 400 AND unloading_date > loading_date + INTERVAL '2 days') OR
@@ -1794,7 +1794,7 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
         SELECT vehicle_no, COUNT(DISTINCT loading_date) as working_days
         FROM swift_trip_log
         WHERE vehicle_no IN ('{vehicles_str}')
-        AND loading_date >= '{start_date}' AND loading_date <= '{end_date}'
+        AND loading_date >= '{start_date}' AND loading_date < ('{end_date}'::date + interval '1 day')
         GROUP BY vehicle_no
     ),
     vehicle_pod AS (
@@ -1802,7 +1802,7 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
         FROM cn_data cn
         JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
         WHERE stl.vehicle_no IN ('{vehicles_str}')
-        AND stl.loading_date >= '{start_date}' AND stl.loading_date <= '{end_date}'
+        AND stl.loading_date >= '{start_date}' AND stl.loading_date < ('{end_date}'::date + interval '1 day')
         AND (cn.pod_status ILIKE '%Delay%' OR cn.pod_status ILIKE '%NOT OK%' OR cn.pod_status ILIKE '%NOT OKAY%')
         GROUP BY stl.vehicle_no
     ),
@@ -1810,7 +1810,7 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
         SELECT vm.swift_no as vehicle_no, COUNT(*) as challan_count, COALESCE(SUM(c.amount), 0) as challan_amount
         FROM challan_data c
         JOIN vehicle_name_map vm ON vm.gps_no = c.vehicle_no
-        WHERE c.challan_date >= '{start_date}' AND c.challan_date <= '{end_date}'
+        WHERE c.challan_date >= '{start_date}' AND c.challan_date < ('{end_date}'::date + interval '1 day')
         GROUP BY vm.swift_no
     ),
     vehicle_repairs AS (
@@ -1818,7 +1818,7 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
         FROM repair_data
         WHERE vehicle_no IN ('{vehicles_str}')
         AND COALESCE(voucher_date, doe) >= '{start_date}'
-        AND COALESCE(voucher_date, doe) <= '{end_date}'
+        AND COALESCE(voucher_date, doe) < ('{end_date}'::date + interval '1 day')
         GROUP BY vehicle_no
     ),
     vehicle_gps AS (
@@ -1827,7 +1827,7 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
             SUM(CASE WHEN g.night_drive > 0 THEN 1 ELSE 0 END) as night_drive_days
         FROM day_wise_gps_km g
         JOIN vehicle_name_map vm ON vm.gps_no = g.vehicle_no
-        WHERE g.date >= '{start_date}' AND g.date <= '{end_date}'
+        WHERE g.date >= '{start_date}' AND g.date < ('{end_date}'::date + interval '1 day')
         GROUP BY vm.swift_no
     ),
     vehicle_intangles AS (
@@ -1839,7 +1839,7 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
             COALESCE(SUM(CASE WHEN i.alert_type = 'idling' THEN i.fuel_consumed ELSE 0 END), 0) as idling_fuel
         FROM intangles_alert_logs i
         JOIN vehicle_name_map vm ON vm.gps_no = i.vehicle_plate
-        WHERE i.event_time >= '{start_date}' AND i.event_time <= '{end_date}'
+        WHERE i.event_time >= '{start_date}' AND i.event_time < ('{end_date}'::date + interval '1 day')
         GROUP BY vm.swift_no
     )
     SELECT
@@ -2080,7 +2080,7 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         FROM swift_trip_log
         WHERE driver_code IS NOT NULL
         AND loading_date >= '{start_date}'
-        AND loading_date <= '{end_date}'
+        AND loading_date < ('{end_date}'::date + interval '1 day')
         GROUP BY driver_code, driver_name
     ),
     driver_delays AS (
@@ -2091,7 +2091,7 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         WHERE driver_code IS NOT NULL
         AND trip_status = 'Loaded'
         AND loading_date >= '{start_date}'
-        AND loading_date <= '{end_date}'
+        AND loading_date < ('{end_date}'::date + interval '1 day')
         AND unloading_date IS NOT NULL
         AND (
             (distance <= 400 AND unloading_date > loading_date + INTERVAL '2 days') OR
@@ -2109,7 +2109,7 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
         WHERE stl.driver_code IS NOT NULL
         AND stl.loading_date >= '{start_date}'
-        AND stl.loading_date <= '{end_date}'
+        AND stl.loading_date < ('{end_date}'::date + interval '1 day')
         AND (cn.pod_status ILIKE '%Delay%' OR cn.pod_status ILIKE '%NOT OK%' OR cn.pod_status ILIKE '%NOT OKAY%')
         GROUP BY stl.driver_code
     ),
@@ -2121,7 +2121,7 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         FROM challan_data
         WHERE driver_code IS NOT NULL
         AND challan_date >= '{start_date}'
-        AND challan_date <= '{end_date}'
+        AND challan_date < ('{end_date}'::date + interval '1 day')
         GROUP BY driver_code
     ),
     driver_repairs AS (
@@ -2134,7 +2134,7 @@ def get_low_performance_drivers(_engine, start_date, end_date):
             AND COALESCE(r.voucher_date, r.doe) <= COALESCE(stl.unloading_date, stl.loading_date + INTERVAL '5 days')
         WHERE stl.driver_code IS NOT NULL
         AND COALESCE(r.voucher_date, r.doe) >= '{start_date}'
-        AND COALESCE(r.voucher_date, r.doe) <= '{end_date}'
+        AND COALESCE(r.voucher_date, r.doe) < ('{end_date}'::date + interval '1 day')
         GROUP BY stl.driver_code
     ),
     driver_gps AS (
@@ -2146,7 +2146,7 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         FROM day_wise_gps_km
         WHERE driver_code IS NOT NULL
         AND date >= '{start_date}'
-        AND date <= '{end_date}'
+        AND date < ('{end_date}'::date + interval '1 day')
         GROUP BY driver_code
     ),
     driver_intangles AS (
@@ -2160,7 +2160,7 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         FROM intangles_alert_logs
         WHERE driver_code IS NOT NULL
         AND event_time >= '{start_date}'
-        AND event_time <= '{end_date}'
+        AND event_time < ('{end_date}'::date + interval '1 day')
         GROUP BY driver_code
     )
     SELECT
@@ -2252,7 +2252,7 @@ def preload_all_drivers_cache(_engine):
             # 2. BULK: All trip data (single query for ALL drivers)
             trip_query = f"""
             SELECT * FROM swift_trip_log
-            WHERE loading_date >= '{start_str}' AND loading_date <= '{end_str}'
+            WHERE loading_date >= '{start_str}' AND loading_date < ('{end_str}'::date + interval '1 day')
             ORDER BY driver_code, loading_date DESC
             """
             trip_result = conn.execute(text(trip_query))
@@ -2276,7 +2276,7 @@ def preload_all_drivers_cache(_engine):
             # 4. BULK: All challan data (single query)
             challan_query = f"""
             SELECT * FROM challan_data
-            WHERE challan_date >= '{start_str}' AND challan_date <= '{end_str}'
+            WHERE challan_date >= '{start_str}' AND challan_date < ('{end_str}'::date + interval '1 day')
             """
             challan_result = conn.execute(text(challan_query))
             all_challans = pd.DataFrame(challan_result.fetchall(), columns=challan_result.keys())
@@ -2289,7 +2289,7 @@ def preload_all_drivers_cache(_engine):
             # 5. BULK: All repair data (single query)
             repair_query = f"""
             SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data
-            WHERE COALESCE(voucher_date, doe) >= '{start_str}' AND COALESCE(voucher_date, doe) <= '{end_str}'
+            WHERE COALESCE(voucher_date, doe) >= '{start_str}' AND COALESCE(voucher_date, doe) < ('{end_str}'::date + interval '1 day')
             """
             repair_result = conn.execute(text(repair_query))
             all_repairs = pd.DataFrame(repair_result.fetchall(), columns=repair_result.keys())
@@ -2304,7 +2304,7 @@ def preload_all_drivers_cache(_engine):
             SELECT cn.*, stl.loading_date, stl.driver_code
             FROM cn_data cn
             INNER JOIN swift_trip_log stl ON cn.tl_no = stl.tlhs_no
-            WHERE stl.loading_date >= '{start_str}' AND stl.loading_date <= '{end_str}'
+            WHERE stl.loading_date >= '{start_str}' AND stl.loading_date < ('{end_str}'::date + interval '1 day')
             AND (cn.pod_status ILIKE '%Delay%' OR cn.pod_status ILIKE '%NOT OK%')
             """
             pod_result = conn.execute(text(pod_query))
@@ -2321,7 +2321,7 @@ def preload_all_drivers_cache(_engine):
                    COUNT(CASE WHEN overspeed > 0 THEN 1 END) as overspeed_count,
                    COUNT(CASE WHEN night_drive > 0 THEN 1 END) as night_drive_count
             FROM day_wise_gps_km
-            WHERE date >= '{start_str}' AND date <= '{end_str}'
+            WHERE date >= '{start_str}' AND date < ('{end_str}'::date + interval '1 day')
             GROUP BY driver_code, TO_CHAR(date, 'YYYY-MM')
             """
             safety_result = conn.execute(text(safety_query))
@@ -2345,7 +2345,7 @@ def preload_all_drivers_cache(_engine):
                    COALESCE(SUM(CASE WHEN alert_type = 'idling' THEN (end_time - start_time) / 60.0 ELSE 0 END), 0) as it,
                    COALESCE(SUM(CASE WHEN alert_type = 'idling' THEN fuel_consumed ELSE 0 END), 0) as ifl
             FROM intangles_alert_logs
-            WHERE event_time >= '{start_str}' AND event_time <= '{end_str}'
+            WHERE event_time >= '{start_str}' AND event_time < ('{end_str}'::date + interval '1 day')
             GROUP BY driver_code, TO_CHAR(event_time, 'YYYY-MM')
             """
             intangles_result = conn.execute(text(intangles_query))
@@ -2415,93 +2415,26 @@ def show_fleet_manager(engine):
     st.markdown("### 🚛 Fleet Manager Performance")
     st.markdown("*Fleet manager performance based on vehicles assigned*")
 
-    # Fleet Manager -> Vehicle mapping
-    FLEET_MANAGER_VEHICLES = {
-        "VISHAL": [
-            "0020 NL01AJ","0167 NL01AH","0219 NL01AH","0283 NL01AH",
-            "0523 GJ08AU","0536 GJ08AU","0570 GJ08AU","0572 GJ08AU",
-            "0639 GJ08AU","0699 GJ08AU","1797 PB11BR",
-            "2081NL01AJ","2082NL01AJ","2083NL01AJ","2084NL01AJ","2209NL01AJ",
-            "2623 NL01AG","2625 NL01AG","3137 NL01AG",
-            "4061 NL01N","4062 NL01N","4064 NL01N","4066 NL01N","4067 NL01N",
-            "4079 NL01AG",
-            "4385 NL01AJ","4387 NL01AJ","4389 NL01AJ",
-            "4521 NL01AH","4522 NL01AH","4523 NL01AH","4524 NL01AH",
-            "4525 NL01AH","4526 NL01AH","4527 NL01AH","4528 NL01AH",
-            "4529 NL01AH","4530 NL01AH",
-            "7178NL01AJ","7225 NL01AF",
-            "8314 NL01AG","9392 NL01AH","9450 NL01L","9455 NL01L",
-            "9457 NL01L","9458 NL01L","9566 NL01AH",
-            "9889 NL01AF","9890 NL01AF","9891 NL01AF","9991 NL01AG",
-            "HR55AM 1370",
-        ],
-        "GOPI": [
-            "0218 NL01AH","0628 GJ08AU","0740 GJ08AU","0863 GJ08AU",
-            "0908 GJ08AU","0951 GJ08AU","0983 GJ08AU","0986 GJ08AU",
-            "1107 NL01AH","1108 NL01AH","1109 NL01AH","1110 NL01AH",
-            "1111 NL01AH","1112 NL01AH","1113 NL01AH","1114 NL01AH","1115 NL01AH",
-            "2210NL01AJ","2211NL01AJ",
-            "2396 NL01N","2397 NL01N","2398 NL01N","2399 NL01N","2400 NL01N",
-            "3431 NL01AG","3432 NL01AG","3433 NL01AG",
-            "3748 HR55AR",
-            "3906 NL01N","3907 NL01N","3908 NL01N","3909 NL01N","3910 NL01N",
-            "4065 NL01N","4068 NL01N","4069 NL01N",
-            "4388 NL01AJ","4390 NL01AJ",
-            "4531 HR55AR","4531 NL01AH","4532 NL01AH","4533 NL01AH",
-            "4534 NL01AH","4535 NL01AH","4536 NL01AH","4537 NL01AH",
-            "4538 NL01AH","4539 NL01AH",
-            "5825NL01AJ","5826NL01AJ","5827NL01AJ","5828NL01AJ",
-            "6158 HR55AQ","6429 HR55AQ",
-            "6456NL01AJ","6457NL01AJ","6458NL01AJ","6459NL01AJ","6460NL01AJ",
-            "6469 HR55AQ","6484HR55AQ",
-            "7175NL01AJ","7176 NL01AJ","7177NL01AJ",
-            "7220 NL01AF","7222 NL01AF","7223 NL01AF","7224 NL01AF","7226 NL01AF",
-            "8204 NL01AH","8224 HR55AQ","8315 NL01AG",
-            "8450 HR55AQ","8593 HR55AR","8597 HR55AR",
-            "8739 HR55AQ","8752 HR55AR","8795 HR55AR",
-            "9452 NL01L","9460 NL01L","9494 HR55AQ",
-        ],
-        "JAGDISH": [
-            "0284 NL01AH","0285 NL01AH","0286 NL01AH",
-            "0722 GJ08AU","0739 GJ08AU","0764 GJ08AU",
-            "0814 GJ08AU","0815 GJ08AU","0816 GJ08AU","0824 GJ08AU",
-            "2624 NL01AG","3136 NL01AG",
-            "4063 NL01N",
-            "8630 NL01AG","9451NL01L",
-            "NL01Q 8157","HR55AP 1974",
-            "HR55AM 2340","HR55AM 9667","HR55AM 0907","HR55AM 8703",
-            "HR55AN 5406","HR55AN 5307",
-            "HR55AM 4278","HR55AM 6059",
-            "NL01Q8150","NL01Q9547",
-        ],
-        "PRAVEEN": [
-            "0959 HR55AQ","1171 HR55AR","1564 HR55AQ","1652 NL01AH","1741 HR55AR",
-            "2206NL01AJ","2207NL01AJ","2208NL01AJ",
-            "2829 HR55AR","2885 HR55AQ","2942 HR55AQ",
-            "3135 NL01AG",
-            "4078 NL01AG","4080 NL01AG","4149 HR55AQ","4180 HR55AQ","4274 HR55AR",
-            "4540 NL01AH",
-            "4849 NL01AH","4850 NL01AH","4851 NL01AH","4852 NL01AH",
-            "4853 NL01AH","4854 NL01AH","4855 NL01AH","4856 NL01AH",
-            "4857 NL01AH","4858 NL01AH",
-            "5077 HR55AQ",
-            "5305 NL01N","5306 NL01N","5307 NL01N","5309 NL01N",
-            "5417 HR55AQ","5495 HR55AR","5578 HR55AR","5709 HR55AR",
-            "5819NL01AJ","5820NL01AJ","5821NL01AJ","5822NL01AJ",
-            "5823NL01AJ","5824 HR55AQ","5824NL01AJ",
-            "6017 HR55AR",
-            "7169NL01AJ","7170NL01AJ","7171NL01AJ","7172NL01AJ",
-            "7173NL01AJ","7174NL01AJ",
-            "7219 NL01AF","7221 NL01AF",
-            "7521 NL01N","7522 NL01N","7523 NL01N","7524 NL01N","7525 NL01N",
-            "7526 NL01N","7527 NL01N","7528 NL01N","7529 NL01N","7530 NL01N",
-            "7553 HR55AR","7745 HR55AR","8008 HR55AR","8078 HR55AR",
-            "8193 NL01AH",
-            "9080 HR55AQ","9104 HR55AR","9244 HR55AQ","9256 HR55AQ",
-            "9453 NL01L","9454 NL01L","9456 NL01L",
-            "9702 HR55AR","9851 NL01AH",
-        ],
-    }
+    # Fleet Manager -> Vehicle mapping (from database)
+    try:
+        with engine.connect() as conn:
+            fm_result = conn.execute(text(
+                "SELECT vehicle_no, fleet_manager FROM swift_vehicles WHERE fleet_manager IS NOT NULL"
+            ))
+            fm_rows = fm_result.fetchall()
+    except Exception as e:
+        st.error(f"Error loading fleet manager mapping: {e}")
+        return
+    FLEET_MANAGER_VEHICLES = {}
+    for vno, fm in fm_rows:
+        fm_upper = fm.upper()
+        if fm_upper not in FLEET_MANAGER_VEHICLES:
+            FLEET_MANAGER_VEHICLES[fm_upper] = []
+        FLEET_MANAGER_VEHICLES[fm_upper].append(vno)
+
+    if not FLEET_MANAGER_VEHICLES:
+        st.warning("No fleet manager vehicle mappings found in database.")
+        return
 
     # --- Month Filter ---
     current_date = datetime.now()
@@ -2575,7 +2508,7 @@ def show_fleet_manager(engine):
 
     cards_html = '<div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:15px;">'
     cards_html += f'<div style="flex:1; min-width:180px;">{vehicle_card("Total Vehicles", len(vehicle_list_df), total_active, total_inactive, True)}</div>'
-    for fm_name in ['VISHAL', 'GOPI', 'JAGDISH', 'PRAVEEN']:
+    for fm_name in sorted(FLEET_MANAGER_VEHICLES.keys()):
         fa = fm_active[fm_name]
         cards_html += f'<div style="flex:1; min-width:150px;">{vehicle_card(fm_name, fa["total"], fa["active"], fa["inactive"])}</div>'
     cards_html += '</div>'
