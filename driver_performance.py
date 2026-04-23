@@ -390,6 +390,7 @@ def load_all_data_to_cache(_engine, cache_store):
                     SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data
                     WHERE driver_code = '{driver_code}'
                     AND COALESCE(voucher_date, doe) >= '{start_date}' AND COALESCE(voucher_date, doe) < ('{end_date}'::date + interval '1 day')
+                    AND TRIM(dr_party) IN ('Vehicle Repairs & Maintenance - Spare A/c', 'Enroute Repair Expenses', 'Vehicle Repairs & Maintenance - Labour A/c')
                     """
                     repair_result = conn.execute(text(repair_query))
                     repair_rows = repair_result.fetchall()
@@ -552,6 +553,7 @@ def get_all_driver_data(_engine, driver_code, start_str, end_str):
             WHERE driver_code = '{driver_code}'
             AND COALESCE(voucher_date, doe) >= '{start_str}'
             AND COALESCE(voucher_date, doe) < ('{end_str}'::date + interval '1 day')
+            AND TRIM(dr_party) IN ('Vehicle Repairs & Maintenance - Spare A/c', 'Enroute Repair Expenses', 'Vehicle Repairs & Maintenance - Labour A/c')
             ORDER BY effective_date DESC
             """
             repair_result = conn.execute(text(repair_query))
@@ -790,7 +792,7 @@ def get_repair_data(_engine, driver_code, start_date, end_date):
     WHERE driver_code = '{driver_code}'
     AND COALESCE(voucher_date, doe) >= '{start_date}'
     AND COALESCE(voucher_date, doe) < ('{end_date}'::date + interval '1 day')
-    AND (dr_party NOT ILIKE '%DEF%' OR dr_party IS NULL)
+    AND TRIM(dr_party) IN ('Vehicle Repairs & Maintenance - Spare A/c', 'Enroute Repair Expenses', 'Vehicle Repairs & Maintenance - Labour A/c')
     ORDER BY COALESCE(voucher_date, doe) DESC
     """
     try:
@@ -1674,6 +1676,7 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
         WHERE vehicle_no IN ('{vehicles_str}')
         AND COALESCE(voucher_date, doe) >= '{start_date}'
         AND COALESCE(voucher_date, doe) < ('{end_date}'::date + interval '1 day')
+        AND TRIM(dr_party) IN ('Vehicle Repairs & Maintenance - Spare A/c', 'Enroute Repair Expenses', 'Vehicle Repairs & Maintenance - Labour A/c')
         GROUP BY vehicle_no
     ),
     vehicle_gps AS (
@@ -1822,6 +1825,7 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
         WHERE vehicle_no IN ('{vehicles_str}')
         AND COALESCE(voucher_date, doe) >= '{start_date}'
         AND COALESCE(voucher_date, doe) < ('{end_date}'::date + interval '1 day')
+        AND TRIM(dr_party) IN ('Vehicle Repairs & Maintenance - Spare A/c', 'Enroute Repair Expenses', 'Vehicle Repairs & Maintenance - Labour A/c')
         GROUP BY vehicle_no
     ),
     vehicle_gps AS (
@@ -2137,6 +2141,7 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         WHERE stl.driver_code IS NOT NULL
         AND COALESCE(r.voucher_date, r.doe) >= '{start_date}'
         AND COALESCE(r.voucher_date, r.doe) < ('{end_date}'::date + interval '1 day')
+        AND TRIM(r.dr_party) IN ('Vehicle Repairs & Maintenance - Spare A/c', 'Enroute Repair Expenses', 'Vehicle Repairs & Maintenance - Labour A/c')
         GROUP BY stl.driver_code
     ),
     driver_gps AS (
@@ -2292,6 +2297,7 @@ def preload_all_drivers_cache(_engine):
             repair_query = f"""
             SELECT *, COALESCE(voucher_date, doe) as effective_date FROM repair_data
             WHERE COALESCE(voucher_date, doe) >= '{start_str}' AND COALESCE(voucher_date, doe) < ('{end_str}'::date + interval '1 day')
+            AND TRIM(dr_party) IN ('Vehicle Repairs & Maintenance - Spare A/c', 'Enroute Repair Expenses', 'Vehicle Repairs & Maintenance - Labour A/c')
             """
             repair_result = conn.execute(text(repair_query))
             all_repairs = pd.DataFrame(repair_result.fetchall(), columns=repair_result.keys())
