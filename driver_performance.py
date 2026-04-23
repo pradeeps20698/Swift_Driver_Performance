@@ -2518,7 +2518,7 @@ def show_fleet_manager(engine):
     cards_html += '</div>'
     st.markdown(cards_html, unsafe_allow_html=True)
 
-    with st.expander("View Vehicle List", expanded=False):
+    with st.expander("View Not Active Vehicle List", expanded=False):
         # Add active status to the list
         vehicle_list_df['Status'] = vehicle_list_df['Vehicle No'].apply(lambda v: 'Active' if v in active_vehicles_set else 'Not Active')
         # Show only Not Active vehicles
@@ -2644,12 +2644,12 @@ def show_fleet_manager(engine):
                     <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">{int(row['total_qty'])}</p>
                 </div>
                 <div style="text-align:center; flex:1;">
-                    <p style="margin:0; color:#bbb; font-size:0.8rem;">Delay Car Lifted</p>
-                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">{int(row['delay_car_lifted'])}</p>
-                </div>
-                <div style="text-align:center; flex:1;">
                     <p style="margin:0; color:#bbb; font-size:0.8rem;">POD Damage (Cars)</p>
                     <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">{int(row['pod_damage_count'])}</p>
+                </div>
+                <div style="text-align:center; flex:1;">
+                    <p style="margin:0; color:#bbb; font-size:0.8rem;">Challan Amount</p>
+                    <p style="margin:0; color:white; font-size:1.1rem; font-weight:bold;">₹{row['challan_amount']:,.0f}</p>
                 </div>
                 <div style="text-align:center; flex:1;">
                     <p style="margin:0; color:#bbb; font-size:0.8rem;">WD (No Driver)</p>
@@ -2658,6 +2658,28 @@ def show_fleet_manager(engine):
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+    # --- WD (No Driver) Vehicle List --- uses same logic as card: all assigned vehicles not in swift_drivers
+    all_assigned = [v for vlist in FLEET_MANAGER_VEHICLES.values() for v in vlist]
+    vehicles_with_driver = set()
+    try:
+        with engine.connect() as conn:
+            vs = "','".join(all_assigned)
+            r = conn.execute(text(f"SELECT DISTINCT current_vehicle_number FROM swift_drivers WHERE current_vehicle_number IN ('{vs}') AND current_vehicle_number IS NOT NULL AND current_vehicle_number != ''"))
+            vehicles_with_driver = {row[0] for row in r.fetchall()}
+    except Exception:
+        pass
+
+    wd_vehicles = []
+    for fm, vehicles in FLEET_MANAGER_VEHICLES.items():
+        for v in vehicles:
+            if v not in vehicles_with_driver:
+                wd_vehicles.append({"Fleet Manager": fm, "Vehicle No": v})
+
+    if wd_vehicles:
+        wd_df = pd.DataFrame(wd_vehicles).sort_values(['Fleet Manager', 'Vehicle No']).reset_index(drop=True)
+        with st.expander(f"View WD (No Driver) Vehicle List ({len(wd_df)})", expanded=False):
+            st.markdown(create_detail_table(wd_df, "WD (No Driver) Vehicles"), unsafe_allow_html=True)
 
     st.markdown("---")
 
