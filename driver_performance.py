@@ -1096,20 +1096,20 @@ def calculate_delay(row):
     """
     Calculate if a trip is delayed based on:
     - TT (Transit Time) = distance / 350 (number of days expected)
-    - Actual days = unloading_date - loading_date (excluding loading day)
+    - Actual days = report_unloading_date - loading_date (excluding loading day)
     - If unloading date is Sunday, add 1 day to TT
     - Delay = Actual days > TT
     Returns: 1 if delayed, 0 if on time, None if cannot calculate
     """
     try:
         # Only calculate for loaded trips with valid dates
-        if pd.isna(row.get('loading_date')) or pd.isna(row.get('unloading_date')):
+        if pd.isna(row.get('loading_date')) or pd.isna(row.get('report_unloading_date')):
             return None
         if pd.isna(row.get('distance')) or row.get('distance', 0) <= 0:
             return None
 
         loading_date = pd.to_datetime(row['loading_date'])
-        unloading_date = pd.to_datetime(row['unloading_date'])
+        unloading_date = pd.to_datetime(row['report_unloading_date'])
         distance = float(row['distance'])
 
         # Calculate TT (Transit Time) = distance / 350
@@ -1390,20 +1390,20 @@ def get_delay_details(trip_df, month=None):
         return pd.DataFrame()
 
     # Select available columns (using tlhs_no as TL No)
-    cols_to_show = ['tlhs_no', 'loading_date', 'unloading_date', 'route', 'vehicle_no', 'distance']
+    cols_to_show = ['tlhs_no', 'loading_date', 'report_unloading_date', 'route', 'vehicle_no', 'distance']
     available_cols = [c for c in cols_to_show if c in delayed_df.columns]
     display_df = delayed_df[available_cols].copy()
 
     if 'loading_date' in display_df.columns:
         display_df['loading_date'] = pd.to_datetime(display_df['loading_date']).dt.strftime('%d-%b-%Y')
-    if 'unloading_date' in display_df.columns:
-        display_df['unloading_date'] = pd.to_datetime(display_df['unloading_date']).dt.strftime('%d-%b-%Y')
+    if 'report_unloading_date' in display_df.columns:
+        display_df['report_unloading_date'] = pd.to_datetime(display_df['report_unloading_date']).dt.strftime('%d-%b-%Y')
 
     # Rename columns
     col_names = {
         'tlhs_no': 'TL No',
         'loading_date': 'Loading Date',
-        'unloading_date': 'Unloading Date',
+        'report_unloading_date': 'Report Unloading Date',
         'route': 'Route',
         'vehicle_no': 'Vehicle',
         'distance': 'Distance'
@@ -1636,12 +1636,12 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
         WHERE vehicle_no IN ('{vehicles_str}')
         AND trip_status = 'Loaded'
         AND loading_date >= '{start_date}' AND loading_date < ('{end_date}'::date + interval '1 day')
-        AND unloading_date IS NOT NULL
+        AND report_unloading_date IS NOT NULL
         AND (
-            (distance <= 400 AND unloading_date > loading_date + INTERVAL '2 days') OR
-            (distance > 400 AND distance <= 800 AND unloading_date > loading_date + INTERVAL '3 days') OR
-            (distance > 800 AND distance <= 1400 AND unloading_date > loading_date + INTERVAL '4 days') OR
-            (distance > 1400 AND unloading_date > loading_date + INTERVAL '5 days')
+            (distance <= 400 AND report_unloading_date > loading_date + INTERVAL '2 days') OR
+            (distance > 400 AND distance <= 800 AND report_unloading_date > loading_date + INTERVAL '3 days') OR
+            (distance > 800 AND distance <= 1400 AND report_unloading_date > loading_date + INTERVAL '4 days') OR
+            (distance > 1400 AND report_unloading_date > loading_date + INTERVAL '5 days')
         )
         GROUP BY vehicle_no
     ),
@@ -1784,12 +1784,12 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
         WHERE vehicle_no IN ('{vehicles_str}')
         AND trip_status = 'Loaded'
         AND loading_date >= '{start_date}' AND loading_date < ('{end_date}'::date + interval '1 day')
-        AND unloading_date IS NOT NULL
+        AND report_unloading_date IS NOT NULL
         AND (
-            (distance <= 400 AND unloading_date > loading_date + INTERVAL '2 days') OR
-            (distance > 400 AND distance <= 800 AND unloading_date > loading_date + INTERVAL '3 days') OR
-            (distance > 800 AND distance <= 1400 AND unloading_date > loading_date + INTERVAL '4 days') OR
-            (distance > 1400 AND unloading_date > loading_date + INTERVAL '5 days')
+            (distance <= 400 AND report_unloading_date > loading_date + INTERVAL '2 days') OR
+            (distance > 400 AND distance <= 800 AND report_unloading_date > loading_date + INTERVAL '3 days') OR
+            (distance > 800 AND distance <= 1400 AND report_unloading_date > loading_date + INTERVAL '4 days') OR
+            (distance > 1400 AND report_unloading_date > loading_date + INTERVAL '5 days')
         )
         GROUP BY vehicle_no
     ),
@@ -2094,12 +2094,12 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         AND trip_status = 'Loaded'
         AND loading_date >= '{start_date}'
         AND loading_date < ('{end_date}'::date + interval '1 day')
-        AND unloading_date IS NOT NULL
+        AND report_unloading_date IS NOT NULL
         AND (
-            (distance <= 400 AND unloading_date > loading_date + INTERVAL '2 days') OR
-            (distance > 400 AND distance <= 800 AND unloading_date > loading_date + INTERVAL '3 days') OR
-            (distance > 800 AND distance <= 1400 AND unloading_date > loading_date + INTERVAL '4 days') OR
-            (distance > 1400 AND unloading_date > loading_date + INTERVAL '5 days')
+            (distance <= 400 AND report_unloading_date > loading_date + INTERVAL '2 days') OR
+            (distance > 400 AND distance <= 800 AND report_unloading_date > loading_date + INTERVAL '3 days') OR
+            (distance > 800 AND distance <= 1400 AND report_unloading_date > loading_date + INTERVAL '4 days') OR
+            (distance > 1400 AND report_unloading_date > loading_date + INTERVAL '5 days')
         )
         GROUP BY driver_code
     ),
