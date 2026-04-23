@@ -2423,7 +2423,7 @@ def show_fleet_manager(engine):
     try:
         with engine.connect() as conn:
             fm_result = conn.execute(text(
-                "SELECT vehicle_no, fleet_manager FROM swift_vehicles WHERE fleet_manager IS NOT NULL"
+                "SELECT vehicle_no, fleet_manager FROM fleet_manager_mapping WHERE fleet_manager IS NOT NULL"
             ))
             fm_rows = fm_result.fetchall()
     except Exception as e:
