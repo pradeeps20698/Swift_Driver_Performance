@@ -1614,7 +1614,9 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
     vehicle_trips AS (
         SELECT
             vehicle_no,
+            COUNT(*) as total_trip_count,
             COUNT(CASE WHEN trip_status = 'Loaded' THEN 1 END) as loaded_trip_count,
+            COUNT(CASE WHEN trip_status = 'Empty' THEN 1 END) as empty_trip_count,
             SUM(CASE WHEN trip_status = 'Loaded' THEN car_qty ELSE 0 END) as total_qty,
             SUM(CASE WHEN trip_status = 'Loaded' THEN freight ELSE 0 END) as total_revenue,
             SUM(CASE WHEN trip_status = 'Loaded' THEN distance ELSE 0 END) as loaded_kms,
@@ -1704,7 +1706,7 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
     )
     SELECT
         vt.vehicle_no,
-        vt.total_revenue, vt.total_qty, vt.loaded_trip_count,
+        vt.total_revenue, vt.total_qty, vt.total_trip_count, vt.loaded_trip_count, vt.empty_trip_count,
         vt.loaded_kms, vt.empty_kms, vt.total_running_kms, vt.total_advance,
         COALESCE(vg.gps_kms, 0) as gps_kms,
         COALESCE(vd.delay_count, 0) as delay_count,
@@ -1732,7 +1734,6 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
     LEFT JOIN vehicle_intangles vi ON vt.vehicle_no = vi.vehicle_no
     LEFT JOIN vehicle_working_days vwd ON vt.vehicle_no = vwd.vehicle_no
     LEFT JOIN without_driver wd ON vt.vehicle_no = wd.current_vehicle_number
-    WHERE vt.loaded_trip_count > 0
     ORDER BY vt.vehicle_no
     """
     try:
@@ -1761,7 +1762,9 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
     vehicle_trips AS (
         SELECT
             vehicle_no,
+            COUNT(*) as total_trip_count,
             COUNT(CASE WHEN trip_status = 'Loaded' THEN 1 END) as loaded_trip_count,
+            COUNT(CASE WHEN trip_status = 'Empty' THEN 1 END) as empty_trip_count,
             SUM(CASE WHEN trip_status = 'Loaded' THEN car_qty ELSE 0 END) as total_qty,
             SUM(CASE WHEN trip_status = 'Loaded' THEN freight ELSE 0 END) as total_revenue,
             SUM(CASE WHEN trip_status = 'Loaded' THEN distance ELSE 0 END) as loaded_kms,
@@ -1844,7 +1847,7 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
     )
     SELECT
         vt.vehicle_no,
-        vt.total_revenue, vt.total_qty, vt.loaded_trip_count,
+        vt.total_revenue, vt.total_qty, vt.total_trip_count, vt.loaded_trip_count, vt.empty_trip_count,
         vt.loaded_kms, vt.empty_kms, vt.total_running_kms, vt.total_advance,
         COALESCE(vg.gps_kms, 0) as gps_kms,
         COALESCE(vd.delay_count, 0) as delay_count,
@@ -1870,7 +1873,6 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
     LEFT JOIN vehicle_gps vg ON vt.vehicle_no = vg.vehicle_no
     LEFT JOIN vehicle_intangles vi ON vt.vehicle_no = vi.vehicle_no
     LEFT JOIN vehicle_working_days vwd ON vt.vehicle_no = vwd.vehicle_no
-    WHERE vt.loaded_trip_count > 0
     ORDER BY vt.vehicle_no
     """
     try:
@@ -2400,7 +2402,7 @@ def main():
 
     # Create tabs - use session state to remember selected tab
     if 'active_tab' not in st.session_state:
-        st.session_state.active_tab = "🚛 Fleet Manager"
+        st.session_state.active_tab = "📊 Overall Performance"
     tab_names = ["📊 Overall Performance", "⚠️ Low Performance Driver", "🚛 Fleet Manager"]
     default_tab = tab_names.index(st.session_state.active_tab) if st.session_state.active_tab in tab_names else 0
 
@@ -2810,8 +2812,8 @@ def show_fleet_manager(engine):
 
         st.markdown(f"**{fm_detail}** — {len(vehicle_perf_df)} active vehicles out of {len(FLEET_MANAGER_VEHICLES[fm_detail])} assigned")
 
-        v_display = vehicle_perf_df[['vehicle_no', 'loaded_trip_count', 'total_revenue',
-                                      'total_running_kms', 'delay_count', 'pod_damage_count',
+        v_display = vehicle_perf_df[['vehicle_no', 'total_trip_count', 'loaded_trip_count', 'empty_trip_count',
+                                      'total_revenue', 'total_running_kms', 'delay_count', 'pod_damage_count',
                                       'repair_amount', 'challan_count', 'total_safety_violations']].copy()
         for col in v_display.columns:
             if col in ['total_revenue', 'repair_amount', 'challan_amount', 'contribution']:
@@ -2819,7 +2821,7 @@ def show_fleet_manager(engine):
             elif col in ['total_running_kms']:
                 v_display[col] = v_display[col].apply(lambda x: f"{x:,.0f}")
 
-        v_display.columns = ['Vehicle', 'Trips', 'Revenue', 'KMs', 'Delays', 'POD', 'Repair',
+        v_display.columns = ['Vehicle', 'Total Trips', 'Loaded Trips', 'Empty Trips', 'Revenue', 'KMs', 'Delays', 'POD', 'Repair',
                             'Challans', 'Safety']
         st.markdown(create_detail_table(v_display, f"{fm_detail} Vehicle Performance"), unsafe_allow_html=True)
 
@@ -3333,8 +3335,8 @@ def show_overall_performance(engine):
             # Repair data for this month
             month_repair_df = repair_df_temp[repair_df_temp['month'] == month] if not repair_df_temp.empty else pd.DataFrame()
             repair_cost_month = month_repair_df['amount'].sum() if not month_repair_df.empty else 0
-            branch_repair_month = month_repair_df[month_repair_df['dr_party'].str.contains('Branch', case=False, na=False)]['amount'].sum() if not month_repair_df.empty else 0
             enroute_repair_month = month_repair_df[month_repair_df['dr_party'].str.contains('Enroute', case=False, na=False)]['amount'].sum() if not month_repair_df.empty else 0
+            branch_repair_month = repair_cost_month - enroute_repair_month
 
             behaviour_data[month] = [
                 "0",  # At Home Count
@@ -3352,8 +3354,8 @@ def show_overall_performance(engine):
         challan_amount = displayed_challan['amount'].sum() if not displayed_challan.empty else 0
         displayed_repair = repair_df_temp[repair_df_temp['month'].isin(months)] if not repair_df_temp.empty else pd.DataFrame()
         total_repair_disp = displayed_repair['amount'].sum() if not displayed_repair.empty else 0
-        branch_repair = displayed_repair[displayed_repair['dr_party'].str.contains('Branch', case=False, na=False)]['amount'].sum() if not displayed_repair.empty else 0
         enroute_repair = displayed_repair[displayed_repair['dr_party'].str.contains('Enroute', case=False, na=False)]['amount'].sum() if not displayed_repair.empty else 0
+        branch_repair = total_repair_disp - enroute_repair
 
         behaviour_data['Total'] = [
             "0",  # At Home Count - would need attendance data
