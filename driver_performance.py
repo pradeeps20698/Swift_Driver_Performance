@@ -1639,12 +1639,8 @@ def get_all_fleet_data(_engine, start_date, end_date, all_vehicles_tuple):
         AND trip_status = 'Loaded'
         AND loading_date >= '{start_date}' AND loading_date < ('{end_date}'::date + interval '1 day')
         AND report_unloading_date IS NOT NULL
-        AND (
-            (distance <= 400 AND report_unloading_date > loading_date + INTERVAL '2 days') OR
-            (distance > 400 AND distance <= 800 AND report_unloading_date > loading_date + INTERVAL '3 days') OR
-            (distance > 800 AND distance <= 1400 AND report_unloading_date > loading_date + INTERVAL '4 days') OR
-            (distance > 1400 AND report_unloading_date > loading_date + INTERVAL '5 days')
-        )
+        AND distance > 0
+        AND (report_unloading_date::date - loading_date::date) > (distance / 350.0 + CASE WHEN EXTRACT(DOW FROM report_unloading_date) = 0 THEN 1 ELSE 0 END)
         GROUP BY vehicle_no
     ),
     vehicle_working_days AS (
@@ -1788,12 +1784,8 @@ def get_fleet_vehicle_performance(_engine, start_date, end_date, vehicle_list):
         AND trip_status = 'Loaded'
         AND loading_date >= '{start_date}' AND loading_date < ('{end_date}'::date + interval '1 day')
         AND report_unloading_date IS NOT NULL
-        AND (
-            (distance <= 400 AND report_unloading_date > loading_date + INTERVAL '2 days') OR
-            (distance > 400 AND distance <= 800 AND report_unloading_date > loading_date + INTERVAL '3 days') OR
-            (distance > 800 AND distance <= 1400 AND report_unloading_date > loading_date + INTERVAL '4 days') OR
-            (distance > 1400 AND report_unloading_date > loading_date + INTERVAL '5 days')
-        )
+        AND distance > 0
+        AND (report_unloading_date::date - loading_date::date) > (distance / 350.0 + CASE WHEN EXTRACT(DOW FROM report_unloading_date) = 0 THEN 1 ELSE 0 END)
         GROUP BY vehicle_no
     ),
     vehicle_working_days AS (
@@ -2099,12 +2091,8 @@ def get_low_performance_drivers(_engine, start_date, end_date):
         AND loading_date >= '{start_date}'
         AND loading_date < ('{end_date}'::date + interval '1 day')
         AND report_unloading_date IS NOT NULL
-        AND (
-            (distance <= 400 AND report_unloading_date > loading_date + INTERVAL '2 days') OR
-            (distance > 400 AND distance <= 800 AND report_unloading_date > loading_date + INTERVAL '3 days') OR
-            (distance > 800 AND distance <= 1400 AND report_unloading_date > loading_date + INTERVAL '4 days') OR
-            (distance > 1400 AND report_unloading_date > loading_date + INTERVAL '5 days')
-        )
+        AND distance > 0
+        AND (report_unloading_date::date - loading_date::date) > (distance / 350.0 + CASE WHEN EXTRACT(DOW FROM report_unloading_date) = 0 THEN 1 ELSE 0 END)
         GROUP BY driver_code
     ),
     driver_pod AS (
@@ -2427,6 +2415,75 @@ def show_fleet_manager(engine):
     st.markdown("### 🚛 Fleet Manager Performance")
     st.markdown("*Fleet manager performance based on vehicles assigned*")
 
+    # Vehicle-wise monthly revenue target
+    VEHICLE_TARGET = {
+        "NL01AH0284": 425000, "NL01AH0283": 425000, "NL01AG9991": 425000, "NL01AH0218": 425000,
+        "NL01AH0167": 425000, "NL01AH0285": 425000, "NL01AH0286": 425000, "NL01AH0219": 425000,
+        "NL01AH9392": 425000, "NL01AH8193": 425000, "NL01AH9566": 425000, "NL01AH8204": 425000,
+        "NL01AH9851": 425000, "NL01AJ0020": 425000, "NL01AJ4388": 425000, "NL01AJ4385": 425000,
+        "NL01AJ4389": 425000, "NL01AJ4390": 425000, "NL01AJ4387": 425000, "PB11BR1797": 425000,
+        "NL01L9451": 425000, "NL01L9452": 425000, "NL01L9456": 425000, "NL01L9458": 425000,
+        "NL01L9460": 425000, "NL01L9457": 425000, "NL01L9455": 425000, "NL01L9454": 425000,
+        "NL01L9450": 425000, "NL01L9453": 425000, "NL01AG8314": 425000, "NL01AG8630": 425000,
+        "NL01N4066": 425000, "NL01N4067": 425000, "NL01N4069": 425000, "NL01N4064": 425000,
+        "NL01N4065": 425000, "NL01N4062": 425000, "NL01N4068": 425000, "NL01N4063": 425000,
+        "NL01N4061": 425000, "NL01AG8315": 425000, "NL01N5306": 425000, "NL01N5305": 425000,
+        "NL01N5309": 425000, "NL01N5307": 425000, "GJ08AU0739": 425000, "GJ08AU0983": 425000,
+        "GJ08AU0572": 425000, "GJ08AU0570": 425000, "GJ08AU0628": 425000, "GJ08AU0815": 425000,
+        "GJ08AU0986": 425000, "GJ08AU0814": 425000, "GJ08AU0816": 425000, "GJ08AU0536": 425000,
+        "GJ08AU0824": 425000, "GJ08AU0699": 425000, "GJ08AU0863": 425000, "GJ08AU0908": 425000,
+        "GJ08AU0951": 425000, "GJ08AU0523": 425000, "GJ08AU0722": 425000, "GJ08AU0764": 425000,
+        "GJ08AU0639": 425000, "GJ08AU0740": 425000, "NL01AF7219": 425000, "NL01AF7224": 425000,
+        "NL01AF7221": 425000, "NL01AF7223": 425000, "HR55AQ8224": 425000,
+        "NL01N2399": 325000, "NL01N2396": 325000, "NL01N2398": 325000, "NL01N2397": 325000,
+        "NL01N3909": 325000, "NL01N3910": 325000, "NL01N3907": 325000, "NL01N3906": 325000,
+        "NL01N3908": 325000, "NL01N7524": 325000, "NL01N7526": 325000, "NL01N7525": 325000,
+        "NL01N7529": 325000, "NL01N7527": 325000, "NL01N7530": 325000, "NL01N7528": 325000,
+        "NL01N7522": 325000, "NL01N7523": 325000, "NL01N7521": 325000,
+        "NL01AG4080": 425000, "NL01AG4078": 425000, "NL01AG4079": 425000,
+        "NL01AG2623": 425000, "NL01AG2624": 425000, "NL01AG2625": 425000,
+        "NL01AG3137": 425000, "NL01AG3136": 425000, "NL01AG3135": 425000,
+        "NL01AG3431": 425000, "NL01AG3432": 425000, "NL01AG3433": 425000,
+        "NL01AF7222": 425000, "NL01AF7226": 425000, "NL01AF7220": 425000, "NL01AF7225": 425000,
+        "NL01AF9890": 425000, "NL01AF9889": 425000, "NL01AF9891": 425000,
+        "HR55AQ9080": 500000, "HR55AQ9494": 500000, "HR55AQ5077": 500000, "HR55AQ1564": 500000,
+        "HR55AQ9244": 500000, "HR55AQ9256": 500000, "HR55AQ2942": 500000, "HR55AQ6429": 425000,
+        "HR55AQ4149": 500000, "HR55AR7745": 425000, "HR55AR1171": 425000, "HR55AR8593": 425000,
+        "HR55AR4531": 425000, "HR55AR2829": 425000, "HR55AQ5824": 425000, "HR55AQ2885": 425000,
+        "HR55AQ6158": 500000, "HR55AQ8450": 500000, "HR55AQ4180": 500000, "HR55AQ0959": 500000,
+        "HR55AQ8739": 500000, "HR55AQ5417": 500000, "HR55AQ6469": 425000, "HR55AQ6484": 425000,
+        "HR55AR8008": 425000, "HR55AR8795": 425000, "HR55AR8752": 425000, "HR55AR6017": 425000,
+        "HR55AR5578": 425000, "HR55AR8597": 500000, "HR55AR7553": 425000, "HR55AR9104": 425000,
+        "HR55AR4274": 425000, "HR55AR8078": 425000, "HR55AR5709": 500000, "HR55AR1741": 425000,
+        "HR55AR3748": 500000, "HR55AR9702": 500000, "HR55AR5495": 425000,
+        "NL01AH1110": 425000, "NL01AH1107": 425000, "NL01AH1115": 425000, "NL01AH1114": 425000,
+        "NL01AH1108": 425000, "NL01AH1109": 425000, "NL01AH1113": 425000, "NL01AH1111": 425000,
+        "NL01AH1112": 425000, "NL01AH1652": 425000,
+        "NL01AJ2208": 500000, "NL01AJ2207": 500000, "NL01AJ2206": 500000, "NL01AJ2211": 500000,
+        "NL01AJ2209": 500000, "NL01AJ2210": 500000, "NL01AJ2082": 500000, "NL01AJ2084": 500000,
+        "NL01AJ2081": 500000, "NL01AJ2083": 500000,
+        "NL01AH4858": 500000, "NL01AH4856": 500000, "NL01AH4857": 500000, "NL01AH4852": 500000,
+        "NL01AH4854": 500000, "NL01AH4849": 500000, "NL01AH4851": 500000, "NL01AH4850": 500000,
+        "NL01AH4853": 500000, "NL01AH4855": 500000,
+        "NL01AH4532": 500000, "NL01AH4536": 500000, "NL01AH4537": 500000, "NL01AH4521": 500000,
+        "NL01AH4538": 500000, "NL01AH4528": 500000, "NL01AH4531": 500000, "NL01AH4525": 500000,
+        "NL01AH4523": 500000, "NL01AH4540": 500000, "NL01AH4539": 500000, "NL01AH4527": 500000,
+        "NL01AH4522": 500000, "NL01AH4529": 500000, "NL01AH4530": 500000, "NL01AH4535": 500000,
+        "NL01AH4533": 500000, "NL01AH4526": 500000, "NL01AH4524": 500000, "NL01AH4534": 500000,
+        "NL01AJ5819": 500000, "NL01AJ5820": 500000, "NL01AJ5821": 500000, "NL01AJ5822": 500000,
+        "NL01AJ5823": 500000, "NL01AJ5824": 500000, "NL01AJ5825": 500000, "NL01AJ5826": 500000,
+        "NL01AJ5827": 500000, "NL01AJ5828": 500000,
+        "NL01AJ6456": 500000, "NL01AJ6457": 500000, "NL01AJ6458": 500000, "NL01AJ6459": 500000,
+        "NL01AJ6460": 500000,
+        "NL01AJ7169": 500000, "NL01AJ7170": 500000, "NL01AJ7171": 500000, "NL01AJ7172": 500000,
+        "NL01AJ7173": 500000, "NL01AJ7174": 500000, "NL01AJ7175": 500000, "NL01AJ7176": 500000,
+        "NL01AJ7177": 500000, "NL01AJ7178": 500000,
+        "NL01Q8157": 425000, "HR55AM0907": 425000, "HR55AN5307": 425000, "HR55AM4278": 425000,
+        "HR55AP1974": 425000, "HR55AM1370": 425000, "HR55AM2340": 425000, "HR55AM6059": 425000,
+        "HR55AM9667": 425000, "NL01Q8150": 425000, "NL01Q9547": 425000, "NL01N2400": 425000,
+        "NL01AH8194": 325000,
+    }
+
     # Fleet Manager -> Vehicle mapping (from database)
     try:
         with engine.connect() as conn:
@@ -2548,41 +2605,137 @@ def show_fleet_manager(engine):
         st.info("No performance data available for fleet managers.")
         return
 
-    # Summary metrics as styled cards
-    total_rev = perf_df['total_revenue'].sum()
-    total_contrib = perf_df['contribution'].sum()
-    avg_contrib_pct = (total_contrib / total_rev * 100) if total_rev > 0 else 0
+    # Calculate pro-rated target per fleet manager based on active vehicles
+    # Target is pro-rated: (monthly_target / total_days_in_month) * days_elapsed_till_yesterday
+    total_days_in_month = calendar.monthrange(sel_year, sel_mon)[1]
+    yesterday = datetime.now().date() - timedelta(days=1)
+    if yesterday.year == sel_year and yesterday.month == sel_mon:
+        days_elapsed = yesterday.day
+    elif datetime(sel_year, sel_mon, 1).date() > yesterday:
+        days_elapsed = 0  # future month
+    else:
+        days_elapsed = total_days_in_month  # past month, full target
+
+    fm_targets = {}
+    for fm_name, vehicles in FLEET_MANAGER_VEHICLES.items():
+        active_veh = [v for v in vehicles if v in active_vehicles_set]
+        full_target = sum(VEHICLE_TARGET.get(v, 425000) for v in active_veh)
+        fm_targets[fm_name] = (full_target / total_days_in_month) * days_elapsed
+    perf_df['target'] = perf_df['fleet_manager'].map(fm_targets).fillna(0)
+    perf_df['total_revenue'] = perf_df['total_revenue'].astype(float)
+    perf_df['achievement_pct'] = perf_df.apply(
+        lambda r: (r['total_revenue'] / r['target'] * 100) if r['target'] > 0 else 0, axis=1
+    )
+
+    # Calculate full month target per FM (not pro-rated)
+    fm_full_targets = {}
+    for fm_name, vehicles in FLEET_MANAGER_VEHICLES.items():
+        active_veh = [v for v in vehicles if v in active_vehicles_set]
+        fm_full_targets[fm_name] = sum(VEHICLE_TARGET.get(v, 425000) for v in active_veh)
+    perf_df['target_full_month'] = perf_df['fleet_manager'].map(fm_full_targets).fillna(0)
+    perf_df['shortfall'] = perf_df['target'] - perf_df['total_revenue']
+    perf_df['shortfall_pct'] = perf_df.apply(
+        lambda r: (r['shortfall'] / r['target'] * 100) if r['target'] > 0 else 0, axis=1
+    )
+
+    # Build Fleet Manager Performance table
+    table_rows = []
+    for _, row in perf_df.iterrows():
+        fm_name = row['fleet_manager']
+        table_rows.append({
+            'Fleet Manager': fm_name,
+            'Total Assigned': len(FLEET_MANAGER_VEHICLES[fm_name]),
+            'Active Vehicle': int(row['active_vehicles']),
+            'Target (Full Month)': row['target_full_month'],
+            f'Target (Till {days_elapsed} days)': row['target'],
+            'Actual Revenue': row['total_revenue'],
+            'Shortfall': row['shortfall'],
+            '% Shortfall': row['shortfall_pct'],
+            'Loaded Trips': int(row['loaded_trip_count']),
+            'Total Cars Lifted': int(row['total_qty']),
+        })
+    # Add total row
+    total_assigned = sum(len(v) for v in FLEET_MANAGER_VEHICLES.values())
     total_active_v = int(perf_df['active_vehicles'].sum())
+    total_full_target = perf_df['target_full_month'].sum()
+    total_target = perf_df['target'].sum()
+    total_rev = float(perf_df['total_revenue'].sum())
+    total_shortfall = total_target - total_rev
+    total_shortfall_pct = (total_shortfall / total_target * 100) if total_target > 0 else 0
     total_trips = int(perf_df['loaded_trip_count'].sum())
-    total_delays = int(perf_df['delay_count'].sum())
-    total_pod = int(perf_df['pod_damage_count'].sum())
-    total_repair = perf_df['repair_amount'].sum()
-    total_challan = perf_df['challan_amount'].sum()
-    total_safety = int(perf_df['total_safety_violations'].sum())
-
-    def metric_card(label, value, color="#5dade2"):
-        return f"""
-        <div style="background:linear-gradient(135deg,#1a1a2e,#16213e); padding:14px 10px; border-radius:12px; border-left:4px solid {color}; box-shadow:0 3px 10px rgba(0,0,0,0.25); text-align:center; flex:1; min-width:140px;">
-            <p style="margin:0; color:#aaa; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px;">{label}</p>
-            <p style="margin:5px 0 0 0; color:{color}; font-size:1.3rem; font-weight:bold;">{value}</p>
-        </div>"""
-
-    metrics_html = '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;">'
-    metrics_html += metric_card("Fleet Managers", len(perf_df), "#a29bfe")
-    metrics_html += metric_card("Active Vehicles", total_active_v, "#58d68d")
-    metrics_html += metric_card("Total Trips", total_trips, "#5dade2")
-    metrics_html += metric_card("Total Revenue", f"₹{total_rev:,.0f}", "#f7dc6f")
-    metrics_html += metric_card("Safety Violations", total_safety, "#f1948a")
-    metrics_html += '</div>'
-    metrics_html += '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:15px;">'
-    metrics_html += metric_card("Total Delays", total_delays, "#e74c3c")
-    metrics_html += metric_card("POD Damages", total_pod, "#e67e22")
-    metrics_html += metric_card("Repair Cost", f"₹{total_repair:,.0f}", "#f39c12")
-    metrics_html += metric_card("Challan Amount", f"₹{total_challan:,.0f}", "#d35400")
     total_qty = int(perf_df['total_qty'].sum())
-    metrics_html += metric_card("Total Car Lifted", f"{total_qty:,}", "#2ecc71")
-    metrics_html += '</div>'
-    st.markdown(metrics_html, unsafe_allow_html=True)
+    table_rows.append({
+        'Fleet Manager': 'TOTAL',
+        'Total Assigned': total_assigned,
+        'Active Vehicle': total_active_v,
+        'Target (Full Month)': total_full_target,
+        f'Target (Till {days_elapsed} days)': total_target,
+        'Actual Revenue': total_rev,
+        'Shortfall': total_shortfall,
+        '% Shortfall': total_shortfall_pct,
+        'Loaded Trips': total_trips,
+        'Total Cars Lifted': total_qty,
+    })
+
+    perf_table_df = pd.DataFrame(table_rows)
+    cols = list(perf_table_df.columns)
+
+    # Build styled HTML table
+    perf_html = """<div style="overflow-x:auto; border-radius:12px; border:2px solid #5dade2; box-shadow: 0 4px 15px rgba(93,173,226,0.3);">
+    <table style="width:100%; border-collapse:separate; border-spacing:0; font-size:0.85rem;">
+    <tr>"""
+    for i, col in enumerate(cols):
+        radius = ''
+        if i == 0:
+            radius = 'border-top-left-radius:10px;'
+        elif i == len(cols) - 1:
+            radius = 'border-top-right-radius:10px;'
+        perf_html += f'<th style="background:linear-gradient(135deg,#1a5276,#2471a3); color:white; padding:12px 8px; border-bottom:2px solid #5dade2; border-right:1px solid #2e86c1; text-align:center; font-size:0.8rem; white-space:nowrap; {radius}">{col}</th>'
+    perf_html += '</tr>'
+
+    for idx, trow in enumerate(table_rows):
+        is_total = trow['Fleet Manager'] == 'TOTAL'
+        if is_total:
+            bg = 'background:linear-gradient(135deg,#2c2c54,#3d3d6b);'
+            fw = 'font-weight:bold;'
+            border_top = 'border-top:2px solid #5dade2;'
+        else:
+            bg = f'background:{"#1a1a2e" if idx % 2 == 0 else "#16213e"};'
+            fw = ''
+            border_top = ''
+        is_last = idx == len(table_rows) - 1
+
+        perf_html += f'<tr style="{bg}">'
+        for ci, col in enumerate(cols):
+            val = trow[col]
+            bl_radius = 'border-bottom-left-radius:10px;' if is_last and ci == 0 else ''
+            br_radius = 'border-bottom-right-radius:10px;' if is_last and ci == len(cols) - 1 else ''
+
+            if col in ['Target (Full Month)', f'Target (Till {days_elapsed} days)', 'Actual Revenue']:
+                display_val = f"₹{val:,.0f}"
+                color = 'color:white;'
+            elif col == 'Shortfall':
+                if val <= 0:
+                    display_val = f"▲ ₹{abs(val):,.0f}"
+                    color = 'color:#58d68d;'
+                else:
+                    display_val = f"▼ ₹{abs(val):,.0f}"
+                    color = 'color:#f1948a;'
+            elif col == '% Shortfall':
+                if val <= 0:
+                    display_val = f"▲ {abs(val):.1f}%"
+                    color = 'color:#58d68d;'
+                else:
+                    display_val = f"▼ {abs(val):.1f}%"
+                    color = 'color:#f1948a;'
+            else:
+                display_val = val
+                color = 'color:white;'
+
+            perf_html += f'<td style="padding:10px 8px; border-right:1px solid #333; border-bottom:1px solid #333; text-align:center; {fw} {border_top} {color} {bl_radius} {br_radius}">{display_val}</td>'
+        perf_html += '</tr>'
+    perf_html += '</table></div>'
+    st.markdown(perf_html, unsafe_allow_html=True)
 
     st.markdown("---")
 
@@ -2610,10 +2763,6 @@ def show_fleet_manager(engine):
                 <div>
                     <h3 style="margin:0; color: white; font-size: 1.4rem;">🚛 {fm_name}</h3>
                     <p style="margin: 5px 0 0 0; color: #bbb;">Active Vehicles: {int(row['active_vehicles'])} | Assigned: {len(FLEET_MANAGER_VEHICLES[fm_name])}</p>
-                </div>
-                <div style="text-align: center;">
-                    <p style="margin:0; color: #bbb; font-size: 0.85rem;">Contribution</p>
-                    <p style="margin:0; color: {pct_color}; font-size: 2rem; font-weight: bold;">{contrib_pct:.1f}%</p>
                 </div>
             </div>
             <div style="display: flex; gap: 20px; margin-top: 15px; flex-wrap: wrap;">
@@ -2770,10 +2919,10 @@ def show_fleet_manager(engine):
         perf_df['avg_revenue'] = perf_df.apply(lambda r: r['total_revenue'] / r['active_vehicles'] if r['active_vehicles'] > 0 else 0, axis=1)
         perf_df['avg_km'] = perf_df.apply(lambda r: r['total_running_kms'] / r['active_vehicles'] if r['active_vehicles'] > 0 else 0, axis=1)
         perf_df['delay_load_pct'] = perf_df.apply(lambda r: (r['delay_count'] / r['loaded_trip_count'] * 100) if r['loaded_trip_count'] > 0 else 0, axis=1)
-        display_cols = ['fleet_manager', 'total_revenue', 'avg_revenue', 'total_running_kms',
+        display_cols = ['fleet_manager', 'active_vehicles', 'target', 'total_revenue', 'achievement_pct', 'avg_revenue', 'total_running_kms',
                        'avg_km', 'loaded_trip_count', 'delay_count', 'delay_load_pct',
                        'total_qty', 'delay_car_lifted', 'pod_damage_count', 'without_driver']
-        col_names = ['Fleet Manager', 'Total Revenue', 'Avg Revenue', 'Total KMS',
+        col_names = ['Fleet Manager', 'Active Vehicles', 'Target Revenue', 'Actual Revenue', 'Achievement %', 'Avg Revenue', 'Total KMS',
                     'Avg KM', 'Loaded Trips', 'Delay Trip', '% Delay Load',
                     'Car Lifted', 'Delay Car Lifted', 'POD Damage (Cars)', 'WD (No Driver)']
     elif view_option == "Safety Details":
@@ -2796,11 +2945,11 @@ def show_fleet_manager(engine):
     display_df = perf_df[display_cols].copy()
 
     for col in display_df.columns:
-        if col in ['total_revenue', 'total_advance', 'repair_amount', 'challan_amount', 'contribution', 'avg_revenue']:
+        if col in ['total_revenue', 'total_advance', 'repair_amount', 'challan_amount', 'contribution', 'avg_revenue', 'target']:
             display_df[col] = display_df[col].apply(lambda x: f"₹{x:,.0f}")
         elif col in ['total_running_kms', 'loaded_kms', 'empty_kms', 'gps_kms', 'avg_km']:
             display_df[col] = display_df[col].apply(lambda x: f"{x:,.0f}")
-        elif col in ['contribution_pct', 'delay_load_pct', 'revenue_share_pct']:
+        elif col in ['contribution_pct', 'delay_load_pct', 'revenue_share_pct', 'achievement_pct']:
             display_df[col] = display_df[col].apply(lambda x: f"{x:.1f}%")
         elif col == 'idling_time':
             display_df[col] = display_df[col].apply(lambda x: f"{x:.1f}")
