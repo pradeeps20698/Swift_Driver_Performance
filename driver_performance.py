@@ -1483,12 +1483,62 @@ def get_safety_details(_engine, driver_code, start_date, end_date, safety_type='
             if rows:
                 columns = result.keys()
                 df = pd.DataFrame(rows, columns=columns)
+                df = _calculate_safety_km_from_odometer(_engine, df, safety_type)
                 return df
         return pd.DataFrame()
     except Exception as e:
         return pd.DataFrame()
 
-def format_safety_details(safety_df, month=None, months_list=None):
+@st.cache_data(ttl=1800, show_spinner=False)
+def _calculate_safety_km_from_odometer(_engine, safety_df, safety_type):
+    """Replace total_km with actual KM from odometer for the specific safety event.
+    - night_drive: KM during 12AM-6AM + 11PM-12AM
+    - overspeed: KM during speed > 65
+    """
+    kms = []
+    for _, row in safety_df.iterrows():
+        gps_vehicle = convert_vehicle_no_to_gps_format(row['vehicle_no'])
+        date = row['date']
+        if not gps_vehicle:
+            kms.append(0)
+            continue
+        if safety_type == 'night_drive':
+            query = f"""
+            SELECT
+                COALESCE(
+                    MAX(CASE WHEN EXTRACT(HOUR FROM date_time) < 6 THEN odometer END) -
+                    MIN(CASE WHEN EXTRACT(HOUR FROM date_time) < 6 THEN odometer END), 0
+                ) +
+                COALESCE(
+                    MAX(CASE WHEN EXTRACT(HOUR FROM date_time) >= 23 THEN odometer END) -
+                    MIN(CASE WHEN EXTRACT(HOUR FROM date_time) >= 23 THEN odometer END), 0
+                ) as km
+            FROM fvts_vehicles
+            WHERE vehicle_no = '{gps_vehicle}'
+            AND DATE(date_time) = '{date}'
+            AND (EXTRACT(HOUR FROM date_time) < 6 OR EXTRACT(HOUR FROM date_time) >= 23)
+            """
+        else:
+            query = f"""
+            SELECT
+                COALESCE(MAX(odometer) - MIN(odometer), 0) as km
+            FROM fvts_vehicles
+            WHERE vehicle_no = '{gps_vehicle}'
+            AND DATE(date_time) = '{date}'
+            AND speed > 65
+            """
+        try:
+            with _engine.connect() as conn:
+                result = conn.execute(text(query))
+                r = result.fetchone()
+                kms.append(round(float(r[0]), 2) if r and r[0] else 0)
+        except Exception:
+            kms.append(0)
+    safety_df = safety_df.copy()
+    safety_df['total_km'] = kms
+    return safety_df
+
+def format_safety_details(safety_df, month=None, months_list=None, safety_type='overspeed'):
     """Format safety details for display."""
     if safety_df.empty:
         return pd.DataFrame()
@@ -1507,7 +1557,8 @@ def format_safety_details(safety_df, month=None, months_list=None):
 
     display_df = df[['date', 'vehicle_no', 'total_km', 'count']].copy()
     display_df['date'] = pd.to_datetime(display_df['date']).dt.strftime('%d-%b-%Y')
-    display_df.columns = ['Date', 'Vehicle', 'Total KM', 'Count']
+    km_label = 'Night KM' if safety_type == 'night_drive' else 'Overspeed KM'
+    display_df.columns = ['Date', 'Vehicle', km_label, 'Count']
     return display_df
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -3790,7 +3841,7 @@ def show_overall_performance(engine):
 
             elif detail_metric == "Night Drives":
                 night_df = get_safety_details(engine, driver_code, start_date, end_date, 'night_drive')
-                detail_df = format_safety_details(night_df, detail_month if detail_month != "Total" else None, months_list=months if detail_month == "Total" else None)
+                detail_df = format_safety_details(night_df, detail_month if detail_month != "Total" else None, months_list=months if detail_month == "Total" else None, safety_type='night_drive')
                 if not detail_df.empty:
                     total_count = detail_df['Count'].sum() if 'Count' in detail_df.columns else 0
                     st.markdown(f"**Total Night Drive Days: {len(detail_df)} | Total Instances: {int(total_count)}**")
