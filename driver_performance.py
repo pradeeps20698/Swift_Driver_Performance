@@ -1491,52 +1491,64 @@ def get_safety_details(_engine, driver_code, start_date, end_date, safety_type='
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _calculate_safety_km_from_odometer(_engine, safety_df, safety_type):
-    """Replace total_km with actual KM from odometer for the specific safety event.
+    """Replace total_km with actual KM from odometer in a single batch query.
     - night_drive: KM during 12AM-6AM + 11PM-12AM
     - overspeed: KM during speed > 65
     """
-    kms = []
-    for _, row in safety_df.iterrows():
-        gps_vehicle = convert_vehicle_no_to_gps_format(row['vehicle_no'])
-        date = row['date']
-        if not gps_vehicle:
-            kms.append(0)
-            continue
-        if safety_type == 'night_drive':
-            query = f"""
-            SELECT
-                COALESCE(
-                    MAX(CASE WHEN EXTRACT(HOUR FROM date_time) < 6 THEN odometer END) -
-                    MIN(CASE WHEN EXTRACT(HOUR FROM date_time) < 6 THEN odometer END), 0
-                ) +
-                COALESCE(
-                    MAX(CASE WHEN EXTRACT(HOUR FROM date_time) >= 23 THEN odometer END) -
-                    MIN(CASE WHEN EXTRACT(HOUR FROM date_time) >= 23 THEN odometer END), 0
-                ) as km
-            FROM fvts_vehicles
-            WHERE vehicle_no = '{gps_vehicle}'
-            AND DATE(date_time) = '{date}'
-            AND (EXTRACT(HOUR FROM date_time) < 6 OR EXTRACT(HOUR FROM date_time) >= 23)
-            """
-        else:
-            query = f"""
-            SELECT
-                COALESCE(MAX(odometer) - MIN(odometer), 0) as km
-            FROM fvts_vehicles
-            WHERE vehicle_no = '{gps_vehicle}'
-            AND DATE(date_time) = '{date}'
-            AND speed > 65
-            """
-        try:
-            with _engine.connect() as conn:
-                result = conn.execute(text(query))
-                r = result.fetchone()
-                kms.append(round(float(r[0]), 2) if r and r[0] else 0)
-        except Exception:
-            kms.append(0)
     safety_df = safety_df.copy()
-    safety_df['total_km'] = kms
-    return safety_df
+    # Convert all vehicle numbers to GPS format
+    safety_df['gps_vehicle'] = safety_df['vehicle_no'].apply(convert_vehicle_no_to_gps_format)
+    gps_vehicles = safety_df['gps_vehicle'].dropna().unique().tolist()
+    if not gps_vehicles:
+        safety_df['total_km'] = 0
+        return safety_df.drop(columns=['gps_vehicle'])
+
+    min_date = safety_df['date'].min()
+    max_date = safety_df['date'].max()
+    vehicles_str = "','".join(gps_vehicles)
+
+    if safety_type == 'night_drive':
+        query = f"""
+        SELECT vehicle_no, DATE(date_time) as date,
+            COALESCE(
+                MAX(CASE WHEN EXTRACT(HOUR FROM date_time) < 6 THEN odometer END) -
+                MIN(CASE WHEN EXTRACT(HOUR FROM date_time) < 6 THEN odometer END), 0
+            ) +
+            COALESCE(
+                MAX(CASE WHEN EXTRACT(HOUR FROM date_time) >= 23 THEN odometer END) -
+                MIN(CASE WHEN EXTRACT(HOUR FROM date_time) >= 23 THEN odometer END), 0
+            ) as km
+        FROM fvts_vehicles
+        WHERE vehicle_no IN ('{vehicles_str}')
+        AND DATE(date_time) >= '{min_date}'
+        AND DATE(date_time) <= '{max_date}'
+        AND (EXTRACT(HOUR FROM date_time) < 6 OR EXTRACT(HOUR FROM date_time) >= 23)
+        GROUP BY vehicle_no, DATE(date_time)
+        """
+    else:
+        query = f"""
+        SELECT vehicle_no, DATE(date_time) as date,
+            COALESCE(MAX(odometer) - MIN(odometer), 0) as km
+        FROM fvts_vehicles
+        WHERE vehicle_no IN ('{vehicles_str}')
+        AND DATE(date_time) >= '{min_date}'
+        AND DATE(date_time) <= '{max_date}'
+        AND speed > 65
+        GROUP BY vehicle_no, DATE(date_time)
+        """
+    try:
+        with _engine.connect() as conn:
+            result = conn.execute(text(query))
+            rows = result.fetchall()
+            km_lookup = {}
+            for r in rows:
+                km_lookup[(str(r[0]), str(r[1]))] = round(float(r[2]), 2) if r[2] else 0
+        safety_df['total_km'] = safety_df.apply(
+            lambda row: km_lookup.get((str(row['gps_vehicle']), str(row['date'])), 0), axis=1
+        )
+    except Exception:
+        safety_df['total_km'] = 0
+    return safety_df.drop(columns=['gps_vehicle'])
 
 def format_safety_details(safety_df, month=None, months_list=None, safety_type='overspeed'):
     """Format safety details for display."""
